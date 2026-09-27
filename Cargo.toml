@@ -1,0 +1,35 @@
+[package]
+name = "tax_return_application"
+version = "0.1.0"
+edition = "2021"
+description = "Custom Japanese tax return desktop application (Dioxus)"
+license = "MIT"
+rust-version = "1.83"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde", "clock"] }
+directories = "6"
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "2"
+printpdf = { version = "0.7", default-features = false }
+dioxus = { version = "0.7.9", features = ["desktop"], optional = true }
+
+[features]
+default = ["ui"]
+ui = ["dep:dioxus"]
+
+[lib]
+name = "tax_return_application"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tax_return_application"
+path = "src/main.rs"
+required-features = ["ui"]
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

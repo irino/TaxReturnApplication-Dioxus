@@ -1,0 +1,10 @@
+[application]
+name = "TaxReturnApplication"
+default_platform = "desktop"
+
+[web.app]
+title = "確定申告ソフト"
+
+[bundle]
+identifier = "local.TaxReturnApplication"
+publisher = "TaxReturnApplication"

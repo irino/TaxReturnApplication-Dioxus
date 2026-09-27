@@ -1,0 +1,141 @@
+{
+  "form_id": "blue_return_pl",
+  "title": "所得税青色申告決算書（一般用） 損益計算書（概算）",
+  "page_width_mm": 210.0,
+  "page_height_mm": 297.0,
+  "fields": [
+    {
+      "id": "title",
+      "label": "帳票タイトル",
+      "x_mm": 20.0,
+      "y_mm": 275.0,
+      "font_size": 14.0
+    },
+    {
+      "id": "year",
+      "label": "対象年",
+      "x_mm": 20.0,
+      "y_mm": 262.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "name",
+      "label": "氏名",
+      "x_mm": 20.0,
+      "y_mm": 250.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "business",
+      "label": "屋号",
+      "x_mm": 20.0,
+      "y_mm": 240.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "address",
+      "label": "住所",
+      "x_mm": 20.0,
+      "y_mm": 230.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "sales",
+      "label": "売上金額",
+      "x_mm": 20.0,
+      "y_mm": 210.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "cogs",
+      "label": "仕入金額",
+      "x_mm": 20.0,
+      "y_mm": 200.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "gross",
+      "label": "差引金額（売上総利益）",
+      "x_mm": 20.0,
+      "y_mm": 190.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "exp_travel",
+      "label": "旅費交通費",
+      "x_mm": 20.0,
+      "y_mm": 170.0,
+      "font_size": 10.0
+    },
+    {
+      "id": "exp_comm",
+      "label": "通信費",
+      "x_mm": 20.0,
+      "y_mm": 160.0,
+      "font_size": 10.0
+    },
+    {
+      "id": "exp_supplies",
+      "label": "消耗品費",
+      "x_mm": 20.0,
+      "y_mm": 150.0,
+      "font_size": 10.0
+    },
+    {
+      "id": "exp_rent",
+      "label": "地代家賃",
+      "x_mm": 20.0,
+      "y_mm": 140.0,
+      "font_size": 10.0
+    },
+    {
+      "id": "exp_util",
+      "label": "水道光熱費",
+      "x_mm": 20.0,
+      "y_mm": 130.0,
+      "font_size": 10.0
+    },
+    {
+      "id": "exp_misc",
+      "label": "雑費",
+      "x_mm": 20.0,
+      "y_mm": 120.0,
+      "font_size": 10.0
+    },
+    {
+      "id": "exp_total",
+      "label": "経費合計",
+      "x_mm": 20.0,
+      "y_mm": 108.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "ordinary",
+      "label": "青色申告特別控除前の所得金額",
+      "x_mm": 20.0,
+      "y_mm": 92.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "special",
+      "label": "青色申告特別控除額",
+      "x_mm": 20.0,
+      "y_mm": 80.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "income",
+      "label": "所得金額",
+      "x_mm": 20.0,
+      "y_mm": 68.0,
+      "font_size": 12.0
+    },
+    {
+      "id": "note",
+      "label": "注記",
+      "x_mm": 20.0,
+      "y_mm": 48.0,
+      "font_size": 8.0
+    }
+  ]
+}

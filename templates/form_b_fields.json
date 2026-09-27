@@ -1,0 +1,99 @@
+{
+  "form_id": "form_b",
+  "title": "所得税及び復興特別所得税の確定申告書B（概算）",
+  "page_width_mm": 210.0,
+  "page_height_mm": 297.0,
+  "fields": [
+    {
+      "id": "title",
+      "label": "帳票タイトル",
+      "x_mm": 20.0,
+      "y_mm": 275.0,
+      "font_size": 14.0
+    },
+    {
+      "id": "year",
+      "label": "対象年",
+      "x_mm": 20.0,
+      "y_mm": 262.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "name",
+      "label": "氏名",
+      "x_mm": 20.0,
+      "y_mm": 250.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "address",
+      "label": "住所",
+      "x_mm": 20.0,
+      "y_mm": 240.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "business_income",
+      "label": "事業所得",
+      "x_mm": 20.0,
+      "y_mm": 215.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "total_income",
+      "label": "所得金額合計",
+      "x_mm": 20.0,
+      "y_mm": 200.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "basic_deduction",
+      "label": "基礎控除",
+      "x_mm": 20.0,
+      "y_mm": 185.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "total_deductions",
+      "label": "所得控除合計",
+      "x_mm": 20.0,
+      "y_mm": 170.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "taxable",
+      "label": "課税される所得金額",
+      "x_mm": 20.0,
+      "y_mm": 150.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "income_tax",
+      "label": "所得税額",
+      "x_mm": 20.0,
+      "y_mm": 135.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "surtax",
+      "label": "復興特別所得税額",
+      "x_mm": 20.0,
+      "y_mm": 120.0,
+      "font_size": 11.0
+    },
+    {
+      "id": "total_tax",
+      "label": "所得税及び復興特別所得税の額",
+      "x_mm": 20.0,
+      "y_mm": 100.0,
+      "font_size": 12.0
+    },
+    {
+      "id": "note",
+      "label": "注記",
+      "x_mm": 20.0,
+      "y_mm": 70.0,
+      "font_size": 8.0
+    }
+  ]
+}
