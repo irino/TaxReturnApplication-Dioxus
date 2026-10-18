@@ -62,6 +62,15 @@ impl AppState {
 const STYLES: &str = include_str!("../assets/styles.css");
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    {
+        // WSL2 / Linux環境で画面が真っ白になるWebKitGTK/Mesaの描画問題を回避
+        std::env::set_var("GDK_BACKEND", "x11");
+        std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+    }
+
     let window = WindowBuilder::new()
         .with_title("確定申告ソフト")
         .with_inner_size(LogicalSize::new(1180.0, 780.0));
@@ -70,7 +79,7 @@ fn main() {
         .with_cfg(
             Config::new()
                 .with_window(window)
-                .with_disable_context_menu(true),
+                .with_disable_context_menu(false),
         )
         .launch(App);
 }

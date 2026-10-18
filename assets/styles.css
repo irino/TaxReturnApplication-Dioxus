@@ -227,6 +227,53 @@ body > div {
   font-size: 0.88rem;
 }
 
+.warn-banner {
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 0.65rem 0.8rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.88rem;
+}
+
+.csv-import-box {
+  background: #f8fafc;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-top: 0.8rem;
+}
+
+.csv-textarea {
+  width: 100%;
+  min-height: 90px;
+  font-family: monospace;
+  font-size: 0.85rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  resize: vertical;
+}
+
+.csv-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.csv-preview-table th,
+.csv-preview-table td {
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+}
+
+.csv-preview-table th {
+  background: #edf2f7;
+}
+
 .filter-bar {
   display: flex;
   gap: 0.75rem;

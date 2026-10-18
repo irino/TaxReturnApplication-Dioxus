@@ -1,6 +1,7 @@
-//! Journal entry form and filterable ledger list.
-
 use crate::AppState;
+use tax_return_application::core::csv_import::{
+    parse_legacy_csv, parse_legacy_csv_str, CsvImportReport,
+};
 use tax_return_application::core::journal::{
     format_yen, validate_entry, AccountCode, JournalEntry,
 };
@@ -41,6 +42,11 @@ pub fn LedgerPage() -> Element {
     let mut filter_start_date = use_signal(|| String::new());
     let mut filter_end_date = use_signal(|| String::new());
     let mut sort_order = use_signal(|| SortOrder::DateDesc);
+
+    let mut show_csv_import = use_signal(|| false);
+    let mut csv_input_text = use_signal(|| String::new());
+    let mut csv_report = use_signal(|| Option::<CsvImportReport>::None);
+    let mut csv_replace_mode = use_signal(|| false);
 
     let fiscal_year = app.read().fiscal_year;
     let entries_snapshot = app.read().entries.clone();
@@ -113,20 +119,223 @@ pub fn LedgerPage() -> Element {
         }
 
         div { class: "card",
-            h2 { "会計年度" }
-            div { class: "year-select",
-                label { "r#for": "fiscal-year", "年度" }
-                select {
-                    id: "fiscal-year",
-                    value: "{fiscal_year}",
-                    onchange: move |evt| {
-                        if let Ok(year) = evt.value().parse::<i32>() {
-                            editing_id.set(None);
-                            switch_fiscal_year(app, year);
+            div { style: "display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.8rem;",
+                div {
+                    h2 { style: "margin: 0 0 0.5rem;", "会計年度" }
+                    div { class: "year-select",
+                        label { r#for: "fiscal-year", "年度" }
+                        select {
+                            id: "fiscal-year",
+                            value: "{fiscal_year}",
+                            onchange: move |evt| {
+                                if let Ok(year) = evt.value().parse::<i32>() {
+                                    editing_id.set(None);
+                                    csv_report.set(None);
+                                    switch_fiscal_year(app, year);
+                                }
+                            },
+                            for y in (fiscal_year - 3)..=(fiscal_year + 1) {
+                                option { value: "{y}", selected: y == fiscal_year, "{y}年" }
+                            }
                         }
-                    },
-                    for y in (fiscal_year - 3)..=(fiscal_year + 1) {
-                        option { value: "{y}", selected: y == fiscal_year, "{y}年" }
+                    }
+                }
+                div {
+                    button {
+                        class: if *show_csv_import.read() { "btn btn-secondary" } else { "btn btn-primary" },
+                        onclick: move |_| {
+                            let cur = *show_csv_import.read();
+                            show_csv_import.set(!cur);
+                        },
+                        if *show_csv_import.read() { "▲ CSVインポートを閉じる" } else { "📥 CSVインポート（2行ヘッダー対応）" }
+                    }
+                }
+            }
+
+            if *show_csv_import.read() {
+                div { class: "csv-import-box",
+                    h3 { style: "margin-top: 0; margin-bottom: 0.5rem; font-size: 0.98rem;", "旧Excel仕訳帳 CSVインポート" }
+                    p { style: "font-size: 0.85rem; color: var(--muted); margin-bottom: 0.85rem; line-height: 1.5;",
+                        "2行ヘッダー（日付, №, 借方..., 貸方..., 摘要...）形式のCSVを一括取り込みします。"
+                        br {}
+                        "Shift_JIS (Excel標準) および UTF-8 の両形式に自動対応しています。"
+                    }
+
+                    div { class: "actions", style: "margin-bottom: 0.75rem;",
+                        button {
+                            class: "btn btn-primary btn-sm",
+                            onclick: move |_| {
+                                if let Some(path) = rfd::FileDialog::new()
+                                    .add_filter("CSVファイル (*.csv, *.txt)", &["csv", "txt"])
+                                    .pick_file()
+                                {
+                                    match std::fs::read(&path) {
+                                        Ok(bytes) => {
+                                            let report = parse_legacy_csv(&bytes, fiscal_year);
+                                            csv_report.set(Some(report));
+                                        }
+                                        Err(e) => {
+                                            app.write().error_message = Some(format!("ファイル読み込みに失敗しました: {e}"));
+                                        }
+                                    }
+                                }
+                            },
+                            "📁 CSVファイルを選択して読み込み..."
+                        }
+                    }
+
+                    div { style: "margin-top: 0.5rem;",
+                        label { style: "font-size: 0.82rem; color: var(--muted); font-weight: 600; display: block; margin-bottom: 0.35rem;",
+                            "またはCSVテキストを直接貼り付け:"
+                        }
+                        textarea {
+                            class: "csv-textarea",
+                            placeholder: "例:\n日付,№,借　　　　方,,,貸　　　　方,,,,,集計科目コード１,集計科目コード２,集計除外摘要文１,集計除外摘要文２,摘　　要,摘要２,摘要３\n日付,№,科目ｺｰﾄﾞ,勘定科目,金　　額,科目ｺｰﾄﾞ,勘定科目,金　　額,月,重複チェック,1,3,家事消費等,雑収入,摘要,摘要２,摘要３\n1月5日,1,104,その他の預金,\"165,000.00\",1,売上（収入）,\"165,000.00\",1,FALSE,165000,0,0,0,賃料:(2026年1月分),,",
+                            value: "{csv_input_text}",
+                            oninput: move |evt| csv_input_text.set(evt.value()),
+                        }
+                        div { class: "actions", style: "margin-top: 0.4rem;",
+                            button {
+                                class: "btn btn-secondary btn-sm",
+                                disabled: csv_input_text.read().trim().is_empty(),
+                                onclick: move |_| {
+                                    let text = csv_input_text.read().clone();
+                                    if !text.trim().is_empty() {
+                                        let report = parse_legacy_csv_str(&text, fiscal_year);
+                                        csv_report.set(Some(report));
+                                    }
+                                },
+                                "貼り付けたテキストを解析"
+                            }
+                            if !csv_input_text.read().is_empty() {
+                                button {
+                                    class: "btn btn-secondary btn-sm",
+                                    onclick: move |_| csv_input_text.set(String::new()),
+                                    "クリア"
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(report) = csv_report.read().clone() {
+                        div { style: "margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 0.8rem;",
+                            h4 { style: "margin: 0 0 0.5rem; font-size: 0.92rem;", "解析結果プレビュー" }
+
+                            div { class: "meta-row", style: "margin-bottom: 0.5rem;",
+                                span {
+                                    "取り込み可能: "
+                                    strong { "{report.entries.len()} 件" }
+                                    "（合計金額: ¥{format_yen(report.total_amount())}） / 対象行数: {report.total_data_rows} 行 / スキップ: {report.skipped_rows} 行"
+                                }
+                            }
+
+                            if !report.warnings.is_empty() {
+                                div { class: "warn-banner",
+                                    strong { "⚠️ 科目マッピングに関する注意（{report.warnings.len()}件）:" }
+                                    ul { style: "margin: 0.35rem 0 0; padding-left: 1.2rem; font-size: 0.85rem;",
+                                        for w in report.warnings.iter().take(5) {
+                                            li { "{w}" }
+                                        }
+                                        if report.warnings.len() > 5 {
+                                            li { "...他 {report.warnings.len() - 5} 件" }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if !report.errors.is_empty() {
+                                div { class: "error-banner",
+                                    strong { "❌ 読み込み失敗行（{report.errors.len()}件）:" }
+                                    ul { style: "margin: 0.35rem 0 0; padding-left: 1.2rem; font-size: 0.85rem;",
+                                        for err in report.errors.iter().take(5) {
+                                            li { "{err.line_number}行目: {err.message}" }
+                                        }
+                                        if report.errors.len() > 5 {
+                                            li { "...他 {report.errors.len() - 5} 件" }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if !report.entries.is_empty() {
+                                div { style: "margin-bottom: 0.75rem; overflow-x: auto;",
+                                    table { class: "csv-preview-table",
+                                        thead {
+                                            tr {
+                                                th { "日付" }
+                                                th { "借方" }
+                                                th { "貸方" }
+                                                th { "金額" }
+                                                th { "摘要" }
+                                            }
+                                        }
+                                        tbody {
+                                            for e in report.entries.iter().take(5) {
+                                                tr {
+                                                    td { "{e.date}" }
+                                                    td { "{e.debit.label_ja()}" }
+                                                    td { "{e.credit.label_ja()}" }
+                                                    td { "¥{format_yen(e.amount)}" }
+                                                    td { "{e.description}" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if report.entries.len() > 5 {
+                                        div { style: "font-size: 0.8rem; color: var(--muted); margin-top: 0.3rem;",
+                                            "...他 {report.entries.len() - 5} 件の仕訳"
+                                        }
+                                    }
+                                }
+
+                                div { style: "margin-bottom: 0.85rem; font-size: 0.88rem; display: flex; align-items: center; gap: 0.5rem;",
+                                    input {
+                                        r#type: "checkbox",
+                                        id: "replace-mode-check",
+                                        checked: *csv_replace_mode.read(),
+                                        onchange: move |evt| csv_replace_mode.set(evt.value() == "true"),
+                                    }
+                                    label { r#for: "replace-mode-check",
+                                        "既存の仕訳をすべて削除して置き換える（チェックを外した場合は既存仕訳の末尾に追加）"
+                                    }
+                                }
+
+                                div { class: "actions",
+                                    button {
+                                        class: "btn btn-primary",
+                                        onclick: move |_| {
+                                            let count = report.entries.len();
+                                            let replace = *csv_replace_mode.read();
+                                            {
+                                                let mut state = app.write();
+                                                if replace {
+                                                    state.entries = report.entries.clone();
+                                                } else {
+                                                    state.entries.extend(report.entries.clone());
+                                                }
+                                                state.error_message = None;
+                                                if let Err(e) = persist(&state) {
+                                                    state.error_message = Some(format!("インポート後の保存に失敗しました: {e}"));
+                                                } else {
+                                                    state.status_message = Some(format!("CSVから {} 件の仕訳を取り込み、保存しました", count));
+                                                }
+                                            }
+                                            csv_report.set(None);
+                                            csv_input_text.set(String::new());
+                                            show_csv_import.set(false);
+                                        },
+                                        "✅ {report.entries.len()} 件の仕訳を取り込む"
+                                    }
+                                    button {
+                                        class: "btn btn-secondary",
+                                        onclick: move |_| {
+                                            csv_report.set(None);
+                                        },
+                                        "キャンセル"
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
