@@ -143,7 +143,7 @@ pub fn map_account(code_str: &str, name_str: &str, is_credit: bool) -> (AccountC
     // 1. Direct match with standard Japanese labels
     for code in AccountCode::all() {
         if code.label_ja() == name_trimmed {
-            return (*code, None);
+            return (code.clone(), None);
         }
     }
 
@@ -223,6 +223,36 @@ pub fn map_account(code_str: &str, name_str: &str, is_credit: bool) -> (AccountC
     }
     if name_trimmed.contains("元入金") || name_trimmed.contains("資本") {
         return (AccountCode::Capital, None);
+    }
+    if name_trimmed.contains("広告") || name_trimmed.contains("宣伝") {
+        return (AccountCode::Advertising, None);
+    }
+    if name_trimmed.contains("接待") || name_trimmed.contains("交際") {
+        return (AccountCode::Entertainment, None);
+    }
+    if name_trimmed.contains("保険") {
+        return (AccountCode::Insurance, None);
+    }
+    if name_trimmed.contains("修繕") || name_trimmed.contains("修理") {
+        return (AccountCode::Repair, None);
+    }
+    if name_trimmed.contains("外注") || name_trimmed.contains("委託") {
+        return (AccountCode::Subcontracting, None);
+    }
+    if name_trimmed.contains("給料") || name_trimmed.contains("給与") || name_trimmed.contains("賃金") {
+        return (AccountCode::Salaries, None);
+    }
+    if name_trimmed.contains("福利") {
+        return (AccountCode::Welfare, None);
+    }
+    if name_trimmed.contains("利子") || name_trimmed.contains("利息") {
+        return (AccountCode::Interest, None);
+    }
+    if name_trimmed.contains("租税") || name_trimmed.contains("公課") || name_trimmed.contains("印紙") {
+        return (AccountCode::TaxesAndDues, None);
+    }
+    if name_trimmed.contains("荷造") || name_trimmed.contains("運賃") || name_trimmed.contains("送料") {
+        return (AccountCode::PackingShipping, None);
     }
 
     // Fallback with warning

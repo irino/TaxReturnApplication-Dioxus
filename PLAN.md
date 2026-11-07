@@ -24,11 +24,12 @@ This plan implements the architecture and milestones in `AGENTS.md`, then extend
 |------|--------|
 | Project bootstrap | Completed (Pure Rust / Dioxus Desktop architecture) |
 | `src/` modules | Completed (`core/`, `storage/`, `pdf/`, `ui/`, `main.rs`, `lib.rs`) |
-| Core journal models | Completed (`JournalEntry`, `AccountCode`, `validate_entry`, unit tests) |
-| UI shell / ledger | Completed (Reactive input form with Add & Edit, date range filter, sort order toggle, stats summary) |
-| Storage | Completed (OS project data dirs, per-year JSON atomic save/load, auto-recovery) |
-| Tax calc / PDF | Completed (Blue Return P&L + special deduction 0/100k/650k, Form B brackets, PDF engine with JSON field maps) |
-| Toolchain & Tests | 27 unit tests passing, `cargo check --features ui` clean |
+| Core journal models | Completed (`JournalEntry` with sub-accounts, `AccountCode` standard + custom, `validate_entry`, unit tests) |
+| UI shell / ledger | Completed (3-screen navigation: Ledger, Report, Closing & Settings) |
+| Storage | Completed (OS project data dirs, per-year JSON atomic save/load, schema v3) |
+| Tax calc / PDF | Completed (Blue Return P&L + special deduction 0/100k/650k, Form B brackets, dynamic expenses, PDF engine) |
+| Phase 1 Expansion | Completed (Custom accounts, sub-accounts, home-office allocation, fiscal rollover) |
+| Toolchain & Tests | 34 unit tests passing, `cargo check --features ui` clean |
 
 ---
 

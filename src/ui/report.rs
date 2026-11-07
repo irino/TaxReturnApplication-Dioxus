@@ -170,11 +170,21 @@ pub fn ReportPage() -> Element {
                     }
                 }
                 tbody {
-                    for (name, amount) in blue.expenses.lines() {
-                        tr {
-                            key: "{name}",
-                            td { "{name}" }
-                            td { class: "amount", "¥{format_yen(amount)}" }
+                    if blue.itemized_expenses.is_empty() {
+                        for (name, amount) in blue.expenses.lines() {
+                            tr {
+                                key: "{name}",
+                                td { "{name}" }
+                                td { class: "amount", "¥{format_yen(amount)}" }
+                            }
+                        }
+                    } else {
+                        for (name, amount) in blue.itemized_expenses.iter() {
+                            tr {
+                                key: "{name}",
+                                td { "{name}" }
+                                td { class: "amount", "¥{format_yen(*amount)}" }
+                            }
                         }
                     }
                 }

@@ -2,7 +2,7 @@
 
 Custom Japanese tax-return desktop app built with a pure Rust / Dioxus stack.
 
-See `AGENTS.md` for product goals and `PLAN.md` for the implementation roadmap.
+See `AGENTS.md` for product goals, `PLAN.md` for the development history, and [`doc/`](doc/README.md) for detailed specifications, architecture design, and the commercial-grade expansion roadmap (available in both [Japanese](doc/ja/README.md) and [English](doc/en/README.md)).
 
 ## Features (current)
 

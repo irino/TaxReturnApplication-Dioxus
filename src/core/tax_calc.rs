@@ -81,9 +81,14 @@ pub struct BlueReturnSummary {
     pub cost_of_sales: i64,
     /// 売上総利益 = 売上 − 仕入
     pub gross_profit: i64,
+    /// 従来型経費内訳（基本6科目）
     pub expenses: ExpenseBreakdown,
+    /// 追加標準科目・カスタム科目を含む全経費の内訳（科目名, 金額）
+    #[serde(default)]
+    pub itemized_expenses: Vec<(String, i64)>,
+    /// 全経費の総合計（売上原価を除くすべての費用）
     pub total_expenses: i64,
-    /// 差引金額（特別控除前）= 売上総利益 − 経費
+    /// 差引金額（特別控除前）= 売上総利益 − 経費合計
     pub ordinary_income_before_deduction: i64,
     pub special_deduction_kind: BlueSpecialDeductionKind,
     pub special_deduction: i64,
@@ -134,8 +139,8 @@ pub struct TaxReportBundle {
 pub fn aggregate_account_totals(entries: &[JournalEntry]) -> BTreeMap<AccountCode, i64> {
     let mut raw: BTreeMap<AccountCode, i64> = BTreeMap::new();
     for entry in entries {
-        *raw.entry(entry.debit).or_default() += entry.amount;
-        *raw.entry(entry.credit).or_default() -= entry.amount;
+        *raw.entry(entry.debit.clone()).or_default() += entry.amount;
+        *raw.entry(entry.credit.clone()).or_default() -= entry.amount;
     }
 
     let mut out = BTreeMap::new();
@@ -149,8 +154,8 @@ pub fn aggregate_account_totals(entries: &[JournalEntry]) -> BTreeMap<AccountCod
     out
 }
 
-fn bal(totals: &BTreeMap<AccountCode, i64>, code: AccountCode) -> i64 {
-    totals.get(&code).copied().unwrap_or(0)
+fn bal(totals: &BTreeMap<AccountCode, i64>, code: &AccountCode) -> i64 {
+    totals.get(code).copied().unwrap_or(0)
 }
 
 /// 青色申告決算書相当の集計。
@@ -161,19 +166,34 @@ pub fn aggregate_blue_return(
 ) -> BlueReturnSummary {
     let totals = aggregate_account_totals(entries);
 
-    let sales = bal(&totals, AccountCode::Sales);
-    let cost_of_sales = bal(&totals, AccountCode::CostOfSales);
+    let sales = bal(&totals, &AccountCode::Sales);
+    let cost_of_sales = bal(&totals, &AccountCode::CostOfSales);
     let gross_profit = sales - cost_of_sales;
 
     let expenses = ExpenseBreakdown {
-        travel: bal(&totals, AccountCode::Travel),
-        communication: bal(&totals, AccountCode::Communication),
-        supplies: bal(&totals, AccountCode::Supplies),
-        rent: bal(&totals, AccountCode::Rent),
-        utilities: bal(&totals, AccountCode::Utilities),
-        miscellaneous: bal(&totals, AccountCode::Miscellaneous),
+        travel: bal(&totals, &AccountCode::Travel),
+        communication: bal(&totals, &AccountCode::Communication),
+        supplies: bal(&totals, &AccountCode::Supplies),
+        rent: bal(&totals, &AccountCode::Rent),
+        utilities: bal(&totals, &AccountCode::Utilities),
+        miscellaneous: bal(&totals, &AccountCode::Miscellaneous),
     };
-    let total_expenses = expenses.total();
+
+    // すべての費用科目（売上原価を除く）を収集・集計
+    let mut itemized_expenses: Vec<(String, i64)> = Vec::new();
+    let mut total_expenses: i64 = 0;
+
+    for (code, amount) in &totals {
+        if code.nature() == AccountNature::Expense && code != &AccountCode::CostOfSales {
+            if *amount > 0 {
+                itemized_expenses.push((code.label_ja().to_string(), *amount));
+            }
+            total_expenses += *amount;
+        }
+    }
+    // 金額降順にソート
+    itemized_expenses.sort_by(|a, b| b.1.cmp(&a.1));
+
     let ordinary_income_before_deduction = gross_profit - total_expenses;
 
     let special_amt = special_deduction.amount();
@@ -192,19 +212,20 @@ pub fn aggregate_blue_return(
         cost_of_sales,
         gross_profit,
         expenses,
+        itemized_expenses,
         total_expenses,
         ordinary_income_before_deduction,
         special_deduction_kind: special_deduction,
         special_deduction: applied_special,
         business_income,
         by_account,
-        cash: bal(&totals, AccountCode::Cash),
-        bank: bal(&totals, AccountCode::Bank),
-        accounts_receivable: bal(&totals, AccountCode::AccountsReceivable),
-        accounts_payable: bal(&totals, AccountCode::AccountsPayable),
-        capital: bal(&totals, AccountCode::Capital),
-        drawings: bal(&totals, AccountCode::Drawings),
-        owner_contribution: bal(&totals, AccountCode::OwnerContribution),
+        cash: bal(&totals, &AccountCode::Cash),
+        bank: bal(&totals, &AccountCode::Bank),
+        accounts_receivable: bal(&totals, &AccountCode::AccountsReceivable),
+        accounts_payable: bal(&totals, &AccountCode::AccountsPayable),
+        capital: bal(&totals, &AccountCode::Capital),
+        drawings: bal(&totals, &AccountCode::Drawings),
+        owner_contribution: bal(&totals, &AccountCode::OwnerContribution),
     }
 }
 

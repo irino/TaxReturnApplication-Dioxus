@@ -5,7 +5,9 @@ mod ui;
 use chrono::{Datelike, Local};
 use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
 use dioxus::prelude::*;
-use tax_return_application::core::journal::{JournalEntry, LedgerDocument, TaxpayerInfo};
+use tax_return_application::core::journal::{
+    AccountDefinition, AllocationRule, JournalEntry, LedgerDocument, TaxpayerInfo,
+};
 use tax_return_application::core::tax_calc::BlueSpecialDeductionKind;
 use tax_return_application::storage::load_year;
 use ui::AppLayout;
@@ -17,6 +19,8 @@ pub struct AppState {
     pub entries: Vec<JournalEntry>,
     pub taxpayer: TaxpayerInfo,
     pub special_deduction: BlueSpecialDeductionKind,
+    pub accounts: Vec<AccountDefinition>,
+    pub allocation_rules: Vec<AllocationRule>,
     pub status_message: Option<String>,
     pub error_message: Option<String>,
 }
@@ -31,6 +35,8 @@ impl AppState {
                 entries: Vec::new(),
                 taxpayer: TaxpayerInfo::default(),
                 special_deduction: BlueSpecialDeductionKind::default(),
+                accounts: AccountDefinition::default_registry(),
+                allocation_rules: Vec::new(),
                 status_message: None,
                 error_message: Some(format!("起動時の読み込みに失敗しました: {e}")),
             },
@@ -43,6 +49,8 @@ impl AppState {
             entries: doc.entries,
             taxpayer: doc.taxpayer,
             special_deduction: doc.special_deduction,
+            accounts: doc.accounts,
+            allocation_rules: doc.allocation_rules,
             status_message: status,
             error_message: None,
         }
@@ -55,6 +63,8 @@ impl AppState {
             entries: self.entries.clone(),
             taxpayer: self.taxpayer.clone(),
             special_deduction: self.special_deduction,
+            accounts: self.accounts.clone(),
+            allocation_rules: self.allocation_rules.clone(),
         }
     }
 }

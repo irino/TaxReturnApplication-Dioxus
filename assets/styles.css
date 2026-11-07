@@ -12,6 +12,9 @@
   --sidebar-text: #d9e2ec;
   --sidebar-active: #243b53;
   --error: #9b1c1c;
+  --accent: #2563eb;
+  --success: #0b6e4f;
+  --bg-hover: #f1f5f9;
   --radius: 10px;
   --shadow: 0 1px 3px rgba(16, 42, 67, 0.08);
   font-family: "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
@@ -375,4 +378,116 @@ table.ledger tr:hover td {
 
 h3.subheading {
   font-weight: 700;
+}
+
+/* Tab Bar */
+.tab-bar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  border-bottom: 2px solid var(--border);
+  padding-bottom: 0.5rem;
+}
+
+.tab-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tab-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.tab-btn.active {
+  color: #fff;
+  background: var(--primary);
+}
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.badge-asset {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.badge-liability {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.badge-equity {
+  background: #f3e8ff;
+  color: #7e22ce;
+}
+
+.badge-income {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.badge-expense {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.badge-custom {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+/* Sub-Account tags & interactive badges */
+.sub-tag {
+  display: inline-block;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-left: 0.35rem;
+  background: var(--bg-hover);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
+
+.sub-badge-interactive {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 12px;
+}
+
+.sub-delete-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.sub-delete-btn:hover {
+  color: var(--danger);
+}
+
+.stat.wide {
+  grid-column: 1 / -1;
 }

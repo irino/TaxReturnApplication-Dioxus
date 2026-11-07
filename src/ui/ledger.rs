@@ -31,7 +31,9 @@ pub fn LedgerPage() -> Element {
     let today = Local::now().date_naive();
     let mut date = use_signal(|| today.format("%Y-%m-%d").to_string());
     let mut debit = use_signal(|| AccountCode::Cash);
+    let mut debit_sub = use_signal(|| String::new());
     let mut credit = use_signal(|| AccountCode::Sales);
+    let mut credit_sub = use_signal(|| String::new());
     let mut amount = use_signal(|| String::new());
     let mut description = use_signal(|| String::new());
     let mut form_error = use_signal(|| Option::<String>::None);
@@ -58,7 +60,7 @@ pub fn LedgerPage() -> Element {
 
     let filtered: Vec<JournalEntry> = {
         let q = filter_text.read().trim().to_string();
-        let account = *filter_account.read();
+        let account = filter_account.read().clone();
         let order = *sort_order.read();
         let mut items = entries_snapshot;
         items.sort_by(|a, b| match order {
@@ -77,10 +79,12 @@ pub fn LedgerPage() -> Element {
                 let text_ok = q.is_empty()
                     || e.description.contains(&q)
                     || e.debit.label_ja().contains(&q)
-                    || e.credit.label_ja().contains(&q);
-                let account_ok = match account {
+                    || e.credit.label_ja().contains(&q)
+                    || e.debit_sub.as_deref().map(|s| s.contains(&q)).unwrap_or(false)
+                    || e.credit_sub.as_deref().map(|s| s.contains(&q)).unwrap_or(false);
+                let account_ok = match &account {
                     None => true,
-                    Some(code) => e.debit == code || e.credit == code,
+                    Some(code) => &e.debit == code || &e.credit == code,
                 };
                 let start_ok = match start_d {
                     None => true,
@@ -102,10 +106,12 @@ pub fn LedgerPage() -> Element {
         || !filter_start_date.read().trim().is_empty()
         || !filter_end_date.read().trim().is_empty();
 
-    let current_debit_label = (*debit.read()).label_ja();
-    let current_credit_label = (*credit.read()).label_ja();
-    let selected_filter_account = (*filter_account.read())
-        .map(|c| c.label_ja())
+    let current_debit_label = debit.read().label_ja().to_string();
+    let current_credit_label = credit.read().label_ja().to_string();
+    let selected_filter_account = filter_account
+        .read()
+        .as_ref()
+        .map(|c| c.label_ja().to_string())
         .unwrap_or_default();
 
     rsx! {
@@ -364,37 +370,81 @@ pub fn LedgerPage() -> Element {
                     }
                 }
                 div { class: "field",
-                    label { "借方" }
+                    label { "借方科目" }
                     select {
                         value: "{current_debit_label}",
                         onchange: move |evt| {
-                            if let Some(code) = account_from_label(&evt.value()) {
-                                debit.set(code);
+                            let state = app.read();
+                            if let Some(acc) = state.accounts.iter().find(|a| a.name == evt.value()) {
+                                debit.set(acc.code.clone());
                             }
                         },
-                        for code in AccountCode::all() {
+                        for acc in app.read().accounts.iter() {
                             option {
-                                value: "{code.label_ja()}",
-                                selected: *debit.read() == *code,
-                                "{code.label_ja()}"
+                                value: "{acc.name}",
+                                selected: debit.read().label_ja() == acc.name,
+                                "{acc.name}"
                             }
                         }
                     }
                 }
                 div { class: "field",
-                    label { "貸方" }
+                    label { "借方 補助科目" }
+                    input {
+                        r#type: "text",
+                        placeholder: "任意（例: 三井住友銀行）",
+                        list: "debit-sub-list",
+                        value: "{debit_sub}",
+                        oninput: move |evt| debit_sub.set(evt.value()),
+                    }
+                    datalist { id: "debit-sub-list",
+                        {
+                            let d_code = debit.read().clone();
+                            let subs = app.read().accounts.iter().find(|a| a.code == d_code).map(|a| a.sub_accounts.clone()).unwrap_or_default();
+                            rsx! {
+                                for s in subs {
+                                    option { value: "{s}" }
+                                }
+                            }
+                        }
+                    }
+                }
+                div { class: "field",
+                    label { "貸方科目" }
                     select {
                         value: "{current_credit_label}",
                         onchange: move |evt| {
-                            if let Some(code) = account_from_label(&evt.value()) {
-                                credit.set(code);
+                            let state = app.read();
+                            if let Some(acc) = state.accounts.iter().find(|a| a.name == evt.value()) {
+                                credit.set(acc.code.clone());
                             }
                         },
-                        for code in AccountCode::all() {
+                        for acc in app.read().accounts.iter() {
                             option {
-                                value: "{code.label_ja()}",
-                                selected: *credit.read() == *code,
-                                "{code.label_ja()}"
+                                value: "{acc.name}",
+                                selected: credit.read().label_ja() == acc.name,
+                                "{acc.name}"
+                            }
+                        }
+                    }
+                }
+                div { class: "field",
+                    label { "貸方 補助科目" }
+                    input {
+                        r#type: "text",
+                        placeholder: "任意（例: 楽天カード）",
+                        list: "credit-sub-list",
+                        value: "{credit_sub}",
+                        oninput: move |evt| credit_sub.set(evt.value()),
+                    }
+                    datalist { id: "credit-sub-list",
+                        {
+                            let c_code = credit.read().clone();
+                            let subs = app.read().accounts.iter().find(|a| a.code == c_code).map(|a| a.sub_accounts.clone()).unwrap_or_default();
+                            rsx! {
+                                for s in subs {
+                                    option { value: "{s}" }
+                                }
                             }
                         }
                     }
@@ -439,10 +489,14 @@ pub fn LedgerPage() -> Element {
                                 return;
                             }
                         };
-                        let mut entry = JournalEntry::new(
+                        let d_sub = debit_sub.read().trim().to_string();
+                        let c_sub = credit_sub.read().trim().to_string();
+                        let mut entry = JournalEntry::new_with_sub(
                             parsed_date,
-                            *debit.read(),
-                            *credit.read(),
+                            debit.read().clone(),
+                            if d_sub.is_empty() { None } else { Some(d_sub) },
+                            credit.read().clone(),
+                            if c_sub.is_empty() { None } else { Some(c_sub) },
                             parsed_amount,
                             description.read().clone(),
                         );
@@ -476,6 +530,8 @@ pub fn LedgerPage() -> Element {
                             }
                         }
                         editing_id.set(None);
+                        debit_sub.set(String::new());
+                        credit_sub.set(String::new());
                         amount.set(String::new());
                         description.set(String::new());
                     },
@@ -487,6 +543,8 @@ pub fn LedgerPage() -> Element {
                         onclick: move |_| {
                             editing_id.set(None);
                             form_error.set(None);
+                            debit_sub.set(String::new());
+                            credit_sub.set(String::new());
                             amount.set(String::new());
                             description.set(String::new());
                         },
@@ -511,13 +569,16 @@ pub fn LedgerPage() -> Element {
                         let v = evt.value();
                         if v.is_empty() {
                             filter_account.set(None);
-                        } else if let Some(code) = account_from_label(&v) {
-                            filter_account.set(Some(code));
+                        } else {
+                            let state = app.read();
+                            if let Some(acc) = state.accounts.iter().find(|a| a.name == v) {
+                                filter_account.set(Some(acc.code.clone()));
+                            }
                         }
                     },
                     option { value: "", "すべての科目" }
-                    for code in AccountCode::all() {
-                        option { value: "{code.label_ja()}", "{code.label_ja()}" }
+                    for acc in app.read().accounts.iter() {
+                        option { value: "{acc.name}", "{acc.name}" }
                     }
                 }
                 div { style: "display: flex; align-items: center; gap: 0.35rem;",
@@ -587,8 +648,18 @@ pub fn LedgerPage() -> Element {
                             tr {
                                 key: "{entry.id}",
                                 td { "{entry.date}" }
-                                td { "{entry.debit.label_ja()}" }
-                                td { "{entry.credit.label_ja()}" }
+                                td {
+                                    span { "{entry.debit.label_ja()}" }
+                                    if let Some(sub) = &entry.debit_sub {
+                                        span { class: "sub-tag", "({sub})" }
+                                    }
+                                }
+                                td {
+                                    span { "{entry.credit.label_ja()}" }
+                                    if let Some(sub) = &entry.credit_sub {
+                                        span { class: "sub-tag", "({sub})" }
+                                    }
+                                }
                                 td { class: "amount", "{format_yen(entry.amount)}" }
                                 td { "{entry.description}" }
                                 td {
@@ -601,8 +672,10 @@ pub fn LedgerPage() -> Element {
                                                     onclick: move |_| {
                                                         editing_id.set(Some(e.id.clone()));
                                                         date.set(e.date.format("%Y-%m-%d").to_string());
-                                                        debit.set(e.debit);
-                                                        credit.set(e.credit);
+                                                        debit.set(e.debit.clone());
+                                                        debit_sub.set(e.debit_sub.clone().unwrap_or_default());
+                                                        credit.set(e.credit.clone());
+                                                        credit_sub.set(e.credit_sub.clone().unwrap_or_default());
                                                         amount.set(e.amount.to_string());
                                                         description.set(e.description.clone());
                                                         form_error.set(None);
@@ -619,6 +692,8 @@ pub fn LedgerPage() -> Element {
                                                     onclick: move |_| {
                                                         if *editing_id.read() == Some(id.clone()) {
                                                             editing_id.set(None);
+                                                            debit_sub.set(String::new());
+                                                            credit_sub.set(String::new());
                                                             amount.set(String::new());
                                                             description.set(String::new());
                                                         }
@@ -646,13 +721,6 @@ pub fn LedgerPage() -> Element {
     }
 }
 
-
-fn account_from_label(label: &str) -> Option<AccountCode> {
-    AccountCode::all()
-        .iter()
-        .copied()
-        .find(|c| c.label_ja() == label)
-}
 
 fn persist(state: &AppState) -> Result<(), String> {
     save_year(&state.to_document()).map_err(|e| e.to_string())
