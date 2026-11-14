@@ -6,9 +6,14 @@
 //! 3. Fiscal year balance rollover (年度繰越処理) into the next fiscal year
 
 use crate::AppState;
+use chrono::NaiveDate;
 use dioxus::prelude::*;
 use tax_return_application::core::allocation::{
     apply_allocations, calculate_allocations, clear_allocations,
+};
+use tax_return_application::core::depreciation::{
+    apply_depreciation_entries, calculate_all_depreciations, clear_depreciation_entries,
+    DepreciationMethod, FixedAsset,
 };
 use tax_return_application::core::journal::{
     format_yen, AccountCode, AccountNature, AllocationRule,
@@ -21,6 +26,7 @@ use tax_return_application::storage::save_year;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClosingTab {
     Accounts,
+    Depreciation,
     Allocation,
     Rollover,
 }
@@ -39,6 +45,17 @@ pub fn ClosingPage() -> Element {
     let mut target_sub_account_code = use_signal(|| Option::<String>::None);
     let mut new_sub_name = use_signal(|| String::new());
 
+    // 固定資産追加用フォームステート
+    let mut asset_name = use_signal(|| String::new());
+    let mut asset_date_str = use_signal(|| String::new());
+    let mut asset_cost_str = use_signal(|| String::new());
+    let mut asset_years = use_signal(|| 4u32);
+    let mut asset_method = use_signal(|| DepreciationMethod::StraightLine);
+    let mut asset_ratio = use_signal(|| 100u8);
+    let mut asset_account = use_signal(|| AccountCode::ToolsAndEquipment);
+    let mut asset_memo = use_signal(|| String::new());
+    let mut asset_error = use_signal(|| Option::<String>::None);
+
     // 家事按分ルール追加用フォームステート
     let mut alloc_account = use_signal(|| AccountCode::Rent);
     let mut alloc_ratio = use_signal(|| 50u8);
@@ -52,6 +69,12 @@ pub fn ClosingPage() -> Element {
 
     let accounts_list = state.accounts.clone();
     let doc_snapshot = state.to_document();
+    let dep_calcs = calculate_all_depreciations(&doc_snapshot);
+    let total_dep_cost: i64 = dep_calcs.iter().map(|c| c.acquisition_cost).sum();
+    let total_dep_opening: i64 = dep_calcs.iter().map(|c| c.opening_book_value).sum();
+    let total_dep_ordinary: i64 = dep_calcs.iter().map(|c| c.ordinary_depreciation).sum();
+    let total_dep_expense: i64 = dep_calcs.iter().map(|c| c.business_expense).sum();
+    let total_dep_closing: i64 = dep_calcs.iter().map(|c| c.closing_book_value).sum();
     let alloc_calcs = calculate_allocations(&doc_snapshot);
     let rollover_preview = calculate_rollover_preview(&doc_snapshot);
 
@@ -71,6 +94,11 @@ pub fn ClosingPage() -> Element {
                 class: if *active_tab.read() == ClosingTab::Accounts { "tab-btn active" } else { "tab-btn" },
                 onclick: move |_| active_tab.set(ClosingTab::Accounts),
                 "勘定科目・補助科目設定"
+            }
+            button {
+                class: if *active_tab.read() == ClosingTab::Depreciation { "tab-btn active" } else { "tab-btn" },
+                onclick: move |_| active_tab.set(ClosingTab::Depreciation),
+                "固定資産台帳・減価償却"
             }
             button {
                 class: if *active_tab.read() == ClosingTab::Allocation { "tab-btn active" } else { "tab-btn" },
@@ -304,6 +332,320 @@ pub fn ClosingPage() -> Element {
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+            },
+
+            ClosingTab::Depreciation => rsx! {
+                // ---- 固定資産台帳 & 減価償却 ----
+                div { class: "card",
+                    h2 { "固定資産の新規登録" }
+                    p { class: "muted",
+                        "PC、車両、備品、ソフトウェアなどの固定資産を登録します。耐用年数や償却方法（定額法・一括償却3年・少額特例30万円）に応じて年末減価償却費が自動計算されます。"
+                    }
+
+                    if let Some(err) = asset_error.read().clone() {
+                        div { class: "error-banner", "{err}" }
+                    }
+
+                    div { class: "form-grid",
+                        div { class: "field",
+                            label { "資産の名称" }
+                            input {
+                                r#type: "text",
+                                placeholder: "例: MacBook Pro M3, 社用車",
+                                value: "{asset_name}",
+                                oninput: move |evt| asset_name.set(evt.value()),
+                            }
+                        }
+                        div { class: "field",
+                            label { "取得年月日" }
+                            input {
+                                r#type: "date",
+                                value: "{asset_date_str}",
+                                oninput: move |evt| asset_date_str.set(evt.value()),
+                            }
+                        }
+                        div { class: "field",
+                            label { "取得価額 (円)" }
+                            input {
+                                r#type: "number",
+                                min: "1",
+                                placeholder: "例: 250000",
+                                value: "{asset_cost_str}",
+                                oninput: move |evt| asset_cost_str.set(evt.value()),
+                            }
+                        }
+                        div { class: "field",
+                            label { "償却方法" }
+                            select {
+                                value: match *asset_method.read() {
+                                    DepreciationMethod::StraightLine => "straight_line",
+                                    DepreciationMethod::LumpSum3Year => "lump_sum_3year",
+                                    DepreciationMethod::ImmediateSmallAsset => "immediate_small_asset",
+                                },
+                                onchange: move |evt| {
+                                    let m = match evt.value().as_str() {
+                                        "lump_sum_3year" => DepreciationMethod::LumpSum3Year,
+                                        "immediate_small_asset" => DepreciationMethod::ImmediateSmallAsset,
+                                        _ => DepreciationMethod::StraightLine,
+                                    };
+                                    asset_method.set(m);
+                                },
+                                option { value: "straight_line", "定額法（原則）" }
+                                option { value: "lump_sum_3year", "一括償却（3年均等・20万円未満）" }
+                                option { value: "immediate_small_asset", "少額減価償却特例（即時償却・30万円未満）" }
+                            }
+                        }
+                        div { class: "field",
+                            label { "耐用年数 (年)" }
+                            input {
+                                r#type: "number",
+                                min: "2",
+                                max: "50",
+                                value: "{asset_years}",
+                                oninput: move |evt| {
+                                    if let Ok(y) = evt.value().parse::<u32>() {
+                                        asset_years.set(y);
+                                    }
+                                },
+                            }
+                        }
+                        div { class: "field",
+                            label { "事業専用割合 (%)" }
+                            input {
+                                r#type: "number",
+                                min: "1",
+                                max: "100",
+                                value: "{asset_ratio}",
+                                oninput: move |evt| {
+                                    if let Ok(r) = evt.value().parse::<u8>() {
+                                        asset_ratio.set(r.clamp(1, 100));
+                                    }
+                                },
+                            }
+                        }
+                        div { class: "field",
+                            label { "資産科目" }
+                            select {
+                                onchange: move |evt| {
+                                    let code = match evt.value().as_str() {
+                                        "vehicles" => AccountCode::Vehicles,
+                                        "buildings" => AccountCode::Buildings,
+                                        "software" => AccountCode::Software,
+                                        _ => AccountCode::ToolsAndEquipment,
+                                    };
+                                    asset_account.set(code);
+                                },
+                                option { value: "tools_and_equipment", "工具器具備品" }
+                                option { value: "vehicles", "車両運搬具" }
+                                option { value: "buildings", "建物" }
+                                option { value: "software", "ソフトウェア" }
+                            }
+                        }
+                        div { class: "field",
+                            label { "メモ・用途" }
+                            input {
+                                r#type: "text",
+                                placeholder: "任意メモ",
+                                value: "{asset_memo}",
+                                oninput: move |evt| asset_memo.set(evt.value()),
+                            }
+                        }
+                    }
+
+                    div { class: "actions", style: "margin-top: 1rem;",
+                        button {
+                            class: "btn btn-primary",
+                            onclick: move |_| {
+                                asset_error.set(None);
+                                let name = asset_name.read().trim().to_string();
+                                if name.is_empty() {
+                                    asset_error.set(Some("資産の名称を入力してください".into()));
+                                    return;
+                                }
+                                let date_str = asset_date_str.read().trim().to_string();
+                                let date = match NaiveDate::parse_from_str(&date_str, "%Y-%m-%d") {
+                                    Ok(d) => d,
+                                    Err(_) => {
+                                        asset_error.set(Some("取得年月日を正しく入力してください（例: 2025-04-01）".into()));
+                                        return;
+                                    }
+                                };
+                                let cost = match asset_cost_str.read().trim().parse::<i64>() {
+                                    Ok(c) if c > 0 => c,
+                                    _ => {
+                                        asset_error.set(Some("取得価額を正の整数で入力してください".into()));
+                                        return;
+                                    }
+                                };
+                                let method = *asset_method.read();
+                                if method == DepreciationMethod::LumpSum3Year && cost >= 200_000 {
+                                    asset_error.set(Some("一括償却資産は取得価額20万円未満が対象です".into()));
+                                    return;
+                                }
+                                if method == DepreciationMethod::ImmediateSmallAsset && cost >= 300_000 {
+                                    asset_error.set(Some("少額減価償却資産特例は取得価額30万円未満が対象です".into()));
+                                    return;
+                                }
+
+                                let asset = FixedAsset::new(
+                                    name,
+                                    date,
+                                    cost,
+                                    *asset_years.read(),
+                                    method,
+                                    *asset_ratio.read(),
+                                    asset_account.read().clone(),
+                                    asset_memo.read().trim().to_string(),
+                                );
+
+                                let mut doc = app.read().to_document();
+                                doc.fixed_assets.push(asset);
+                                if let Err(e) = save_year(&doc) {
+                                    app.write().error_message = Some(format!("保存に失敗しました: {e}"));
+                                } else {
+                                    *app.write() = AppState::from_document(doc, Some("固定資産を登録しました".into()));
+                                    asset_name.set(String::new());
+                                    asset_cost_str.set(String::new());
+                                    asset_memo.set(String::new());
+                                }
+                            },
+                            "固定資産を追加"
+                        }
+                    }
+                }
+
+                // ---- 固定資産台帳 & 当期減価償却計算一覧 ----
+                div { class: "card",
+                    h2 { "{fiscal_year}年 固定資産台帳 & 減価償却費一覧" }
+                    p { class: "muted",
+                        "青色申告決算書 第3面「減価償却費の計算」に準拠した計算結果です。"
+                    }
+
+                    if dep_calcs.is_empty() {
+                        div { class: "empty", "登録されている固定資産はありません。" }
+                    } else {
+                        div { class: "report-grid", style: "margin-bottom: 1.25rem;",
+                            div { class: "stat",
+                                div { class: "label", "資産取得総額" }
+                                div { class: "value", "¥{format_yen(total_dep_cost)}" }
+                            }
+                            div { class: "stat",
+                                div { class: "label", "期首帳簿価額 合計" }
+                                div { class: "value", "¥{format_yen(total_dep_opening)}" }
+                            }
+                            div { class: "stat",
+                                div { class: "label", "本年分普通償却額 合計" }
+                                div { class: "value", "¥{format_yen(total_dep_ordinary)}" }
+                            }
+                            div { class: "stat",
+                                div { class: "label", "本年分必要経費算入額（経費計上分）" }
+                                div { class: "value", style: "color: var(--primary);", "¥{format_yen(total_dep_expense)}" }
+                            }
+                            div { class: "stat",
+                                div { class: "label", "期末残高（未償却残高）合計" }
+                                div { class: "value", "¥{format_yen(total_dep_closing)}" }
+                            }
+                        }
+
+                        div { style: "overflow-x: auto;",
+                            table { class: "ledger",
+                                thead {
+                                    tr {
+                                        th { "資産名" }
+                                        th { "取得年月" }
+                                        th { "取得価額" }
+                                        th { "償却方法" }
+                                        th { "耐用年数" }
+                                        th { "期首帳簿価額" }
+                                        th { "本年償却額" }
+                                        th { "事業割合" }
+                                        th { "必要経費算入額" }
+                                        th { "期末残高" }
+                                        th { "操作" }
+                                    }
+                                }
+                                tbody {
+                                    for c in dep_calcs.iter() {
+                                        tr {
+                                            td {
+                                                strong { "{c.name}" }
+                                                span { class: "sub-tag", "{c.asset_account.label_ja()}" }
+                                            }
+                                            td { "{c.acquisition_date.format(\"%Y-%m\")}" }
+                                            td { class: "amount", "¥{format_yen(c.acquisition_cost)}" }
+                                            td { "{c.depreciation_method.label_ja()}" }
+                                            td { "{c.useful_life_years}年" }
+                                            td { class: "amount", "¥{format_yen(c.opening_book_value)}" }
+                                            td { class: "amount", "¥{format_yen(c.ordinary_depreciation)}" }
+                                            td { "{c.business_ratio_percent}%" }
+                                            td { class: "amount", style: "color: var(--primary); font-weight: 700;", "¥{format_yen(c.business_expense)}" }
+                                            td { class: "amount", "¥{format_yen(c.closing_book_value)}" }
+                                            td {
+                                                {
+                                                    let asset_id = c.asset_id.clone();
+                                                    let asset_name_val = c.name.clone();
+                                                    rsx! {
+                                                        button {
+                                                            class: "btn btn-danger btn-sm",
+                                                            onclick: move |_| {
+                                                                let mut doc = app.read().to_document();
+                                                                doc.fixed_assets.retain(|a| a.id != asset_id);
+                                                                if let Err(e) = save_year(&doc) {
+                                                                    app.write().error_message = Some(format!("保存に失敗しました: {e}"));
+                                                                } else {
+                                                                    *app.write() = AppState::from_document(
+                                                                        doc,
+                                                                        Some(format!("資産「{asset_name_val}」を削除しました")),
+                                                                    );
+                                                                }
+                                                            },
+                                                            "削除"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        div { class: "actions", style: "margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border);",
+                            button {
+                                class: "btn btn-primary",
+                                onclick: move |_| {
+                                    let mut doc = app.read().to_document();
+                                    let count = apply_depreciation_entries(&mut doc);
+                                    if let Err(e) = save_year(&doc) {
+                                        app.write().error_message = Some(format!("仕訳の保存に失敗しました: {e}"));
+                                    } else {
+                                        *app.write() = AppState::from_document(
+                                            doc,
+                                            Some(format!("12月31日付の減価償却仕訳（{count}件）を仕訳帳へ自動反映しました")),
+                                        );
+                                    }
+                                },
+                                "⚡ 減価償却仕訳を一括生成・仕訳帳へ反映（12月31日付）"
+                            }
+                            button {
+                                class: "btn btn-secondary btn-sm",
+                                onclick: move |_| {
+                                    let mut doc = app.read().to_document();
+                                    let cleared = clear_depreciation_entries(&mut doc);
+                                    if let Err(e) = save_year(&doc) {
+                                        app.write().error_message = Some(format!("仕訳のクリアに失敗しました: {e}"));
+                                    } else {
+                                        *app.write() = AppState::from_document(
+                                            doc,
+                                            Some(format!("自動生成された減価償却仕訳（{cleared}件）を削除しました")),
+                                        );
+                                    }
+                                },
+                                "減価償却仕訳をクリア"
                             }
                         }
                     }

@@ -143,12 +143,12 @@ To systematically expand capabilities while maintaining codebase stability and t
   ├── Fiscal Year Balance Roll-Over (B/S 繰越処理) (Implemented)
   └── Closing & Settings Page (ClosingPage) (Implemented)
        ↓
-[Phase 2: Depreciation Ledger & Complete Statutory Deductions] (Next Milestone 🎯)
-  ├── Fixed Asset Register & Automated Depreciation Engine (Straight-line, 3-year, Small asset)
-  ├── Complete Income Tax Deductions (Social insurance, iDeCo, Life insurance, Medical, Donations)
-  └── Mortgage Interest Tax Credit & Form B Expansion
+[Phase 2: Depreciation Ledger & Complete Statutory Deductions] (Completed ✅)
+  ├── Fixed Asset Register & Automated Depreciation Engine (Straight-line, 3-year, Small asset) (Implemented)
+  ├── Complete Income Tax Deductions (Social insurance, iDeCo, Life insurance, Medical, Donations) (Implemented)
+  └── Mortgage Interest Tax Credit & Form B Expansion (Implemented)
        ↓
-[Phase 3: Single-File SQLite & GnuCash / Beancount Interoperability] (Data Storage Modernization 📂)
+[Phase 3: Single-File SQLite & GnuCash / Beancount Interoperability] (Next Milestone 🎯)
   ├── Single-file SQLite persistence (Consolidate all years and masters into one .sqlite/.gnucash)
   ├── GnuCash SQLite compatible schema integration (Direct inspection & interoperability)
   ├── Full compound transaction support (transactions + splits data model)
@@ -190,18 +190,24 @@ To systematically expand capabilities while maintaining codebase stability and t
 - **Closing & Settings Screen (ClosingPage)**:
   - New 3-tab UI shell dedicated to chart of accounts, home-office allocation, and fiscal rollover.
 
-### Phase 2: Depreciation Ledger & Statutory Deductions (Next Milestone 🎯)
+### Phase 2: Depreciation Ledger & Statutory Deductions (Completed ✅)
 - **Fixed Asset Register**:
-  - Model asset properties: Asset Name, Acquisition Date, Cost, Useful Life, and Depreciation Method (Straight-line, 3-year lump sum, Immediate expensing under 300,000 JPY for blue return).
-  - Compute yearly depreciation expense, automatically generate year-end journal entries, and populate Page 3 of the Blue Return statement.
+  - Model asset properties: Asset Name, Acquisition Date, Cost, Useful Life, Depreciation Method (Straight-line, 3-year lump sum, Immediate expensing under 300,000 JPY for blue return), and Business Usage Ratio.
+  - Compute yearly depreciation expense, automatically generate December 31 journal entries (`Debit: Depreciation / Credit: Asset` & `Debit: Drawings / Credit: Asset`), and populate Page 3 of the Blue Return statement with full rollover persistence across fiscal years.
 - **Statutory Deduction Manager**:
-  - Social Insurance (National Health Insurance, National Pension).
+  - Social Insurance (National Health Insurance, National Pension, Nursing Care).
   - Small Business Mutual Aid & iDeCo contributions.
-  - Life Insurance (General, Medical Care, Nursing Care, Individual Annuity under new and old regimes).
-  - Earthquake Insurance, Medical Expense Deduction, and Donation Deduction (Furusato Nozei).
-  - Spouse and Dependent exemptions.
+  - Life Insurance (General, Medical Care, Individual Annuity under new and old regimes with statutory ceiling formulas and 120,000 JPY combined cap).
+  - Earthquake Insurance (including old long-term indemnity, capped at 50,000 JPY), Medical Expense Deduction (100k JPY / 5% income threshold), and Donation Deduction (Furusato Nozei).
+  - Spouse & Special Spouse exemptions (with taxpayer income phase-out tiers), and Dependent exemptions (General, Specific, Elderly living with/apart).
+  - Disability, Single-Parent (350k), Widow (270k), and Working Student (270k) exemptions.
+- **Mortgage Interest & Tax Credits**:
+  - Direct tax credits (Housing loan deduction, Dividend credit) subtracted from assessed income tax before applying the 2.1% Special Reconstruction Surtax.
+- **UI & Form B Integration**:
+  - Added dedicated 4th tab "Fixed Assets & Depreciation" to `ClosingPage`.
+  - Added interactive "Statutory Deductions & Tax Credits" settings card and complete 12-item itemized deduction breakdown table on `ReportPage`.
 
-### Phase 3: Single-File SQLite & GnuCash / Beancount Interoperability (Data Storage Modernization 📂)
+### Phase 3: Single-File SQLite & GnuCash / Beancount Interoperability (Next Milestone 🎯)
 - **Single-File SQLite Persistence (`rusqlite`)**:
   - Consolidate all fiscal years of journal entries, chart of accounts, sub-accounts, and taxpayer info into a single SQLite database file (e.g. `tax_return.sqlite` / `tax_return.gnucash`).
   - Back up and migrate the entire accounting history simply by handling a single file.
@@ -245,6 +251,6 @@ To systematically expand capabilities while maintaining codebase stability and t
 
 ## 6. Summary & Recommended Next Actions
 
-With the completion of Phase 1, **a robust double-entry bookkeeping and fiscal rollover foundation has been established** (customizable chart of accounts, sub-account badges, home-office expense allocation, and balance sheet rollover).
+With the completion of Phase 1 and **Phase 2 (Fixed Assets, Depreciation Engine, Complete Statutory Deductions & Tax Credits)**, the core tax accounting pipeline from daily journal entries to year-end depreciation, deductions, and official Form B calculation is fully implemented.
 
-The recommended next path is to methodically implement **Phase 2: Fixed Assets / Depreciation & Complete Statutory Income Deductions** to satisfy formal tax return filing requirements, followed directly by **Phase 3: Single-File SQLite Modernization (GnuCash & Beancount Interoperability)** to unify multi-year storage and unlock broad open-source ecosystem compatibility.
+The recommended next path is to proceed to **Phase 3: Single-File SQLite Modernization (GnuCash & Beancount Interoperability)** to unify multi-year storage into a single file and unlock broad open-source ecosystem compatibility.

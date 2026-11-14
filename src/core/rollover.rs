@@ -131,11 +131,13 @@ pub fn rollover_to_next_year(prev_doc: &LedgerDocument) -> LedgerDocument {
     let next_year = prev_doc.fiscal_year + 1;
     let mut next_doc = LedgerDocument::new(next_year);
 
-    // 納税者情報・特別控除区分・科目マスタ・按分ルールを引き継ぎ
+    // 納税者情報・特別控除区分・科目マスタ・按分ルール・固定資産台帳・控除設定を引き継ぎ
     next_doc.taxpayer = prev_doc.taxpayer.clone();
     next_doc.special_deduction = prev_doc.special_deduction;
     next_doc.accounts = prev_doc.accounts.clone();
     next_doc.allocation_rules = prev_doc.allocation_rules.clone();
+    next_doc.fixed_assets = prev_doc.fixed_assets.clone();
+    next_doc.deductions = prev_doc.deductions.clone();
 
     let opening_date = match NaiveDate::from_ymd_opt(next_year, 1, 1) {
         Some(d) => d,
@@ -310,6 +312,10 @@ mod tests {
         let ap_entry = next_doc.entries.iter().find(|e| e.credit == AccountCode::AccountsPayable).unwrap();
         assert_eq!(ap_entry.amount, 150_000);
         assert_eq!(ap_entry.debit, AccountCode::Capital);
+
+        // 固定資産と所得控除設定が引き継がれているか
+        assert_eq!(next_doc.fixed_assets.len(), prev.fixed_assets.len());
+        assert_eq!(next_doc.deductions, prev.deductions);
     }
 }
 

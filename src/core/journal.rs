@@ -1,12 +1,14 @@
 //! Journal structures, chart of accounts, sub-accounts, and bookkeeping validation.
 
+use crate::core::deductions::TaxDeductions;
+use crate::core::depreciation::FixedAsset;
 use chrono::{DateTime, Datelike, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
 /// Schema version written into persisted ledger documents.
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 
 /// High-level account nature for balance / P&L classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,6 +41,10 @@ pub enum AccountCode {
     Cash,
     Bank,
     AccountsReceivable,
+    ToolsAndEquipment, // 工具器具備品
+    Vehicles,          // 車両運搬具
+    Buildings,         // 建物
+    Software,          // ソフトウェア
 
     // Liabilities (負債)
     AccountsPayable,
@@ -65,6 +71,7 @@ pub enum AccountCode {
     Entertainment,    // 接待交際費
     Insurance,        // 損害保険料
     Repair,           // 修繕費
+    Depreciation,     // 減価償却費
     Welfare,          // 福利厚生費
     Salaries,         // 給料賃金
     Subcontracting,   // 外注工賃
@@ -81,6 +88,10 @@ const STANDARD_ACCOUNTS: &[AccountCode] = &[
     AccountCode::Cash,
     AccountCode::Bank,
     AccountCode::AccountsReceivable,
+    AccountCode::ToolsAndEquipment,
+    AccountCode::Vehicles,
+    AccountCode::Buildings,
+    AccountCode::Software,
     AccountCode::AccountsPayable,
     AccountCode::Capital,
     AccountCode::Drawings,
@@ -96,6 +107,7 @@ const STANDARD_ACCOUNTS: &[AccountCode] = &[
     AccountCode::Entertainment,
     AccountCode::Insurance,
     AccountCode::Repair,
+    AccountCode::Depreciation,
     AccountCode::Welfare,
     AccountCode::Salaries,
     AccountCode::Subcontracting,
@@ -116,6 +128,10 @@ impl AccountCode {
             Self::Cash => "現金",
             Self::Bank => "普通預金",
             Self::AccountsReceivable => "売掛金",
+            Self::ToolsAndEquipment => "工具器具備品",
+            Self::Vehicles => "車両運搬具",
+            Self::Buildings => "建物",
+            Self::Software => "ソフトウェア",
             Self::AccountsPayable => "買掛金",
             Self::Capital => "元入金",
             Self::Drawings => "事業主貸",
@@ -131,6 +147,7 @@ impl AccountCode {
             Self::Entertainment => "接待交際費",
             Self::Insurance => "損害保険料",
             Self::Repair => "修繕費",
+            Self::Depreciation => "減価償却費",
             Self::Welfare => "福利厚生費",
             Self::Salaries => "給料賃金",
             Self::Subcontracting => "外注工賃",
@@ -144,9 +161,14 @@ impl AccountCode {
 
     pub fn nature(&self) -> AccountNature {
         match self {
-            Self::Cash | Self::Bank | Self::AccountsReceivable | Self::Drawings => {
-                AccountNature::Asset
-            }
+            Self::Cash
+            | Self::Bank
+            | Self::AccountsReceivable
+            | Self::Drawings
+            | Self::ToolsAndEquipment
+            | Self::Vehicles
+            | Self::Buildings
+            | Self::Software => AccountNature::Asset,
             Self::AccountsPayable | Self::OwnerContribution => AccountNature::Liability,
             Self::Capital => AccountNature::Equity,
             Self::Sales => AccountNature::Income,
@@ -160,6 +182,7 @@ impl AccountCode {
             | Self::Entertainment
             | Self::Insurance
             | Self::Repair
+            | Self::Depreciation
             | Self::Welfare
             | Self::Salaries
             | Self::Subcontracting
@@ -343,6 +366,12 @@ pub struct LedgerDocument {
     /// 家事按分ルール
     #[serde(default)]
     pub allocation_rules: Vec<AllocationRule>,
+    /// 固定資産台帳
+    #[serde(default)]
+    pub fixed_assets: Vec<FixedAsset>,
+    /// 各種所得控除・税額控除設定
+    #[serde(default)]
+    pub deductions: TaxDeductions,
 }
 
 impl LedgerDocument {
@@ -355,6 +384,8 @@ impl LedgerDocument {
             special_deduction: crate::core::tax_calc::BlueSpecialDeductionKind::default(),
             accounts: AccountDefinition::default_registry(),
             allocation_rules: Vec::new(),
+            fixed_assets: Vec::new(),
+            deductions: TaxDeductions::default(),
         }
     }
 
@@ -614,6 +645,17 @@ mod tests {
             "売上",
         ));
         doc.add_custom_account("支払手数料", AccountNature::Expense).unwrap();
+        doc.fixed_assets.push(FixedAsset::new(
+            "PC",
+            NaiveDate::from_ymd_opt(2025, 4, 1).unwrap(),
+            200_000,
+            4,
+            crate::core::depreciation::DepreciationMethod::StraightLine,
+            100,
+            AccountCode::ToolsAndEquipment,
+            "ノートPC",
+        ));
+        doc.deductions.social_insurance = 300_000;
 
         let json = serde_json::to_string_pretty(&doc).unwrap();
         let back: LedgerDocument = serde_json::from_str(&json).unwrap();
@@ -624,11 +666,14 @@ mod tests {
         assert_eq!(back.entries[0].debit, AccountCode::Bank);
         assert_eq!(back.entries[0].debit_sub.as_deref(), Some("三井住友"));
         assert!(back.accounts.iter().any(|a| a.name == "支払手数料"));
+        assert_eq!(back.fixed_assets.len(), 1);
+        assert_eq!(back.fixed_assets[0].name, "PC");
+        assert_eq!(back.deductions.social_insurance, 300_000);
     }
 
     #[test]
     fn backwards_compatibility_deserialization() {
-        // v2 style JSON without accounts, allocation_rules, or debit_sub
+        // v2 style JSON without accounts, allocation_rules, fixed_assets, deductions, or debit_sub
         let old_json = r#"{
             "version": 2,
             "fiscal_year": 2025,
@@ -651,6 +696,8 @@ mod tests {
         assert_eq!(doc.entries[0].debit, AccountCode::Cash);
         assert_eq!(doc.entries[0].debit_sub, None);
         assert!(!doc.accounts.is_empty()); // Default registry populated!
+        assert!(doc.fixed_assets.is_empty());
+        assert_eq!(doc.deductions, TaxDeductions::default());
     }
 
     #[test]

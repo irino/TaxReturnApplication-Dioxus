@@ -5,6 +5,8 @@ mod ui;
 use chrono::{Datelike, Local};
 use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
 use dioxus::prelude::*;
+use tax_return_application::core::deductions::TaxDeductions;
+use tax_return_application::core::depreciation::FixedAsset;
 use tax_return_application::core::journal::{
     AccountDefinition, AllocationRule, JournalEntry, LedgerDocument, TaxpayerInfo,
 };
@@ -21,6 +23,8 @@ pub struct AppState {
     pub special_deduction: BlueSpecialDeductionKind,
     pub accounts: Vec<AccountDefinition>,
     pub allocation_rules: Vec<AllocationRule>,
+    pub fixed_assets: Vec<FixedAsset>,
+    pub deductions: TaxDeductions,
     pub status_message: Option<String>,
     pub error_message: Option<String>,
 }
@@ -37,6 +41,8 @@ impl AppState {
                 special_deduction: BlueSpecialDeductionKind::default(),
                 accounts: AccountDefinition::default_registry(),
                 allocation_rules: Vec::new(),
+                fixed_assets: Vec::new(),
+                deductions: TaxDeductions::default(),
                 status_message: None,
                 error_message: Some(format!("起動時の読み込みに失敗しました: {e}")),
             },
@@ -51,6 +57,8 @@ impl AppState {
             special_deduction: doc.special_deduction,
             accounts: doc.accounts,
             allocation_rules: doc.allocation_rules,
+            fixed_assets: doc.fixed_assets,
+            deductions: doc.deductions,
             status_message: status,
             error_message: None,
         }
@@ -65,6 +73,8 @@ impl AppState {
             special_deduction: self.special_deduction,
             accounts: self.accounts.clone(),
             allocation_rules: self.allocation_rules.clone(),
+            fixed_assets: self.fixed_assets.clone(),
+            deductions: self.deductions.clone(),
         }
     }
 }

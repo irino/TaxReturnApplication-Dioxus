@@ -1,6 +1,7 @@
 //! Aggregation and tax estimation for 青色申告決算書 / 確定申告書B.
 //! Pure functions only — no I/O, no UI.
 
+use crate::core::deductions::{compute_all_deductions, CalculatedDeductions, TaxDeductions};
 use crate::core::journal::{AccountCode, AccountNature, JournalEntry};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -116,10 +117,17 @@ pub struct FormBSummary {
     pub total_income: i64,
     /// 基礎控除（令和2年分以降の原則 48万円）
     pub basic_deduction: i64,
-    /// 所得控除合計（現状は基礎控除のみ）
+    /// 各種所得控除・税額控除の計算明細
+    #[serde(default)]
+    pub deductions_detail: CalculatedDeductions,
+    /// 所得控除合計
     pub total_deductions: i64,
     /// 課税所得（千円未満切捨て後）
     pub taxable_income: i64,
+    /// 税額控除前の算出所得税額
+    pub tax_before_credits: i64,
+    /// 税額控除合計（住宅ローン控除等）
+    pub total_tax_credits: i64,
     /// 所得税額（百円未満切捨て）
     pub income_tax: i64,
     /// 復興特別所得税（所得税 × 2.1%）
@@ -273,22 +281,19 @@ pub fn compute_reconstruction_surtax(income_tax: i64) -> i64 {
     income_tax * 21 / 1000
 }
 
-/// 確定申告書B相当の概算。
-pub fn aggregate_form_b(blue: &BlueReturnSummary) -> FormBSummary {
+/// 確定申告書B相当の概算（各種所得控除・税額控除を指定）。
+pub fn aggregate_form_b_with_deductions(
+    blue: &BlueReturnSummary,
+    deductions: &TaxDeductions,
+) -> FormBSummary {
     let business_income = blue.business_income;
     let total_income = business_income;
-    let basic_deduction = if total_income <= 24_000_000 {
-        BASIC_DEDUCTION_DEFAULT
-    } else if total_income <= 24_500_000 {
-        320_000
-    } else if total_income <= 25_000_000 {
-        160_000
-    } else {
-        0
-    };
-    let total_deductions = basic_deduction;
+    let detail = compute_all_deductions(deductions, total_income);
+    let total_deductions = detail.total_deductions;
     let taxable_income = compute_taxable_income(total_income, total_deductions);
-    let income_tax = floor_to_hundred(compute_income_tax_before_rounding(taxable_income));
+    let tax_before_credits = compute_income_tax_before_rounding(taxable_income);
+    let after_credits = (tax_before_credits - detail.total_tax_credits).max(0);
+    let income_tax = floor_to_hundred(after_credits);
     let reconstruction_surtax = compute_reconstruction_surtax(income_tax);
     let total_income_tax = income_tax + reconstruction_surtax;
 
@@ -296,24 +301,47 @@ pub fn aggregate_form_b(blue: &BlueReturnSummary) -> FormBSummary {
         fiscal_year: blue.fiscal_year,
         business_income,
         total_income,
-        basic_deduction,
+        basic_deduction: detail.basic,
+        deductions_detail: detail.clone(),
         total_deductions,
         taxable_income,
+        tax_before_credits,
+        total_tax_credits: detail.total_tax_credits,
         income_tax,
         reconstruction_surtax,
         total_income_tax,
     }
 }
 
-/// 仕訳から帳票一式を集計。
+/// 確定申告書B相当の概算（標準・基礎控除のみ）。
+pub fn aggregate_form_b(blue: &BlueReturnSummary) -> FormBSummary {
+    aggregate_form_b_with_deductions(blue, &TaxDeductions::default())
+}
+
+/// 仕訳と所得控除設定から帳票一式を集計。
+pub fn build_tax_report_with_deductions(
+    entries: &[JournalEntry],
+    fiscal_year: i32,
+    special_deduction: BlueSpecialDeductionKind,
+    deductions: &TaxDeductions,
+) -> TaxReportBundle {
+    let blue = aggregate_blue_return(entries, fiscal_year, special_deduction);
+    let form_b = aggregate_form_b_with_deductions(&blue, deductions);
+    TaxReportBundle { blue, form_b }
+}
+
+/// 仕訳から帳票一式を集計（基礎控除のみ）。
 pub fn build_tax_report(
     entries: &[JournalEntry],
     fiscal_year: i32,
     special_deduction: BlueSpecialDeductionKind,
 ) -> TaxReportBundle {
-    let blue = aggregate_blue_return(entries, fiscal_year, special_deduction);
-    let form_b = aggregate_form_b(&blue);
-    TaxReportBundle { blue, form_b }
+    build_tax_report_with_deductions(
+        entries,
+        fiscal_year,
+        special_deduction,
+        &TaxDeductions::default(),
+    )
 }
 
 // ---- Backward-compatible helper used by older call sites / tests ----
@@ -519,6 +547,50 @@ mod tests {
         let form_b = aggregate_form_b(&summary);
         assert_eq!(form_b.taxable_income, 0);
         assert_eq!(form_b.income_tax, 0);
+    }
+
+    #[test]
+    fn form_b_with_deductions_and_tax_credit() {
+        let entries = vec![entry(
+            6,
+            1,
+            AccountCode::Bank,
+            AccountCode::Sales,
+            5_000_000,
+            "売上",
+        )];
+        let mut deductions = TaxDeductions::default();
+        deductions.social_insurance = 500_000;
+        deductions.small_enterprise_mutual_aid = 240_000;
+        deductions.life_insurance_new_general = 80_000; // 40,000
+        deductions.earthquake_insurance = 30_000; // 30,000
+        deductions.housing_loan_tax_credit = 50_000; // 50,000
+
+        let report = build_tax_report_with_deductions(
+            &entries,
+            2025,
+            BlueSpecialDeductionKind::Yen650k,
+            &deductions,
+        );
+
+        // 事業所得: 5,000,000 - 650,000 = 4,350,000
+        assert_eq!(report.form_b.business_income, 4_350_000);
+        // 所得控除: 480k(基礎) + 500k(社保) + 240k(iDeCo) + 40k(生保) + 30k(地震) = 1,290,000
+        assert_eq!(report.form_b.total_deductions, 1_290_000);
+        // 課税所得: 4,350,000 - 1,290,000 = 3,060,000
+        assert_eq!(report.form_b.taxable_income, 3_060_000);
+        // 税率: 3,060,000 * 10% - 97,500 = 208,500
+        assert_eq!(report.form_b.tax_before_credits, 208_500);
+        // 住宅ローン税額控除: 50,000
+        assert_eq!(report.form_b.total_tax_credits, 50_000);
+        // 差引所得税額: 208,500 - 50,000 = 158,500
+        assert_eq!(report.form_b.income_tax, 158_500);
+        // 復興特別所得税: 158,500 * 2.1% = 3,328
+        assert_eq!(report.form_b.reconstruction_surtax, 158_500 * 21 / 1000);
+        assert_eq!(
+            report.form_b.total_income_tax,
+            158_500 + report.form_b.reconstruction_surtax
+        );
     }
 }
 

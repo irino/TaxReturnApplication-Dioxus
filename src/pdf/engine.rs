@@ -244,7 +244,7 @@ pub fn export_form_b_pdf(
     values.insert("total_tax", yen(form_b.total_income_tax));
     values.insert(
         "note",
-        "※ 概算です。社会保険料控除・扶養控除等は未反映。公式申告には利用しないでください。".into(),
+        "※ 本PDFは公式様式の代替となる概算帳票です。提出前に必ず内容を確認してください。".into(),
     );
 
     paint_map(&prepared, &map, &values)?;
