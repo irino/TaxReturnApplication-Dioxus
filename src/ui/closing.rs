@@ -11,6 +11,8 @@ use dioxus::prelude::*;
 use tax_return_application::core::allocation::{
     apply_allocations, calculate_allocations, clear_allocations,
 };
+use tax_return_application::core::auto_rule::{default_auto_rules, AutoBookingRule, RuleMatchType};
+use tax_return_application::core::beancount::{export_to_beancount, import_from_beancount};
 use tax_return_application::core::depreciation::{
     apply_depreciation_entries, calculate_all_depreciations, clear_depreciation_entries,
     DepreciationMethod, FixedAsset,
@@ -21,7 +23,10 @@ use tax_return_application::core::journal::{
 use tax_return_application::core::rollover::{
     calculate_rollover_preview, rollover_to_next_year,
 };
-use tax_return_application::storage::save_year;
+use tax_return_application::storage::{
+    auto_migrate_if_needed, export_gnucash_database, exports_dir, get_sqlite_stats,
+    open_sqlite_connection, save_year, sqlite_db_path,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClosingTab {
@@ -29,6 +34,8 @@ pub enum ClosingTab {
     Depreciation,
     Allocation,
     Rollover,
+    Storage,
+    AutoRules,
 }
 
 #[component]
@@ -62,6 +69,18 @@ pub fn ClosingPage() -> Element {
     let mut alloc_sub = use_signal(|| String::new());
     let mut alloc_error = use_signal(|| Option::<String>::None);
 
+    // Beancount入出力用ステート
+    let mut beancount_input = use_signal(|| String::new());
+    let mut beancount_preview = use_signal(|| String::new());
+
+    // 自動仕訳ルール用ステート
+    let mut new_rule_name = use_signal(|| String::new());
+    let mut new_rule_pattern = use_signal(|| String::new());
+    let mut new_rule_match_type = use_signal(|| RuleMatchType::Contains);
+    let mut new_rule_account = use_signal(|| AccountCode::Supplies);
+    let mut new_rule_sub = use_signal(|| String::new());
+    let mut rule_error = use_signal(|| Option::<String>::None);
+
     let state = app.read().clone();
     let fiscal_year = state.fiscal_year;
     let status = state.status_message.clone();
@@ -77,6 +96,11 @@ pub fn ClosingPage() -> Element {
     let total_dep_closing: i64 = dep_calcs.iter().map(|c| c.closing_book_value).sum();
     let alloc_calcs = calculate_allocations(&doc_snapshot);
     let rollover_preview = calculate_rollover_preview(&doc_snapshot);
+
+    let sqlite_path = sqlite_db_path().unwrap_or_default();
+    let sqlite_stats = open_sqlite_connection(&sqlite_path)
+        .ok()
+        .and_then(|c| get_sqlite_stats(&sqlite_path, &c).ok());
 
     rsx! {
         h1 { class: "page-title", "{fiscal_year}年 決算・設定" }
@@ -109,6 +133,16 @@ pub fn ClosingPage() -> Element {
                 class: if *active_tab.read() == ClosingTab::Rollover { "tab-btn active" } else { "tab-btn" },
                 onclick: move |_| active_tab.set(ClosingTab::Rollover),
                 "年度繰越処理"
+            }
+            button {
+                class: if *active_tab.read() == ClosingTab::Storage { "tab-btn active" } else { "tab-btn" },
+                onclick: move |_| active_tab.set(ClosingTab::Storage),
+                "データ保存 & 相互運用"
+            }
+            button {
+                class: if *active_tab.read() == ClosingTab::AutoRules { "tab-btn active" } else { "tab-btn" },
+                onclick: move |_| active_tab.set(ClosingTab::AutoRules),
+                "自動仕訳ルール設定"
             }
         }
 
@@ -955,7 +989,207 @@ pub fn ClosingPage() -> Element {
                         }
                     }
                 }
-            }
+            },
+
+            ClosingTab::Storage => rsx! {
+                // ---- データ保存 & 相互運用 ----
+                div { class: "card",
+                    h2 { "単一ファイル SQLite (GnuCash互換) データベース状態" }
+                    p { class: "muted",
+                        "全年度の仕訳・マスタを単一のSQLiteデータベースで一元管理しています。GnuCashデスクトップで直接閲覧・相互運用可能な標準テーブルスキーマ（books, accounts, transactions, splits, slots）に準拠しています。"
+                    }
+
+                    if let Some(stats) = &sqlite_stats {
+                        div { class: "report-grid", style: "margin-bottom: 1.25rem;",
+                            div { class: "stat",
+                                div { class: "label", "DBファイルサイズ" }
+                                div { class: "value", "{format_file_size(stats.file_size_bytes)}" }
+                            }
+                            div { class: "stat",
+                                div { class: "label", "登録年度数" }
+                                div { class: "value", "{stats.registered_years.len()} 年度" }
+                            }
+                            div { class: "stat",
+                                div { class: "label", "総取引件数（Transactions）" }
+                                div { class: "value", "{stats.total_transactions} 件" }
+                            }
+                            div { class: "stat",
+                                div { class: "label", "総明細行数（Splits）" }
+                                div { class: "value", "{stats.total_splits} 行" }
+                            }
+                        }
+
+                        div { style: "font-size: 0.88rem; color: var(--muted); margin-bottom: 1rem; word-break: break-all;",
+                            strong { "保存先パス: " }
+                            span { "{stats.db_path.display()}" }
+                            br {}
+                            strong { "登録済み年度: " }
+                            span {
+                                "{stats.registered_years.iter().map(|y| y.to_string()).collect::<Vec<_>>().join(\", \")}"
+                            }
+                        }
+                    }
+
+                    div { class: "actions", style: "padding-top: 0.75rem; border-top: 1px solid var(--border);",
+                        button {
+                            class: "btn btn-primary",
+                            onclick: move |_| {
+                                match exports_dir() {
+                                    Ok(dir) => {
+                                        let target = dir.join("accounting.gnucash");
+                                        let sp = sqlite_path.clone();
+                                        match open_sqlite_connection(&sp) {
+                                            Ok(conn) => match export_gnucash_database(&conn, &target) {
+                                                Ok(_) => {
+                                                    app.write().status_message = Some(format!(
+                                                        "GnuCash互換ファイルをエクスポートしました: {}",
+                                                        target.display()
+                                                    ));
+                                                }
+                                                Err(e) => {
+                                                    app.write().error_message = Some(format!("エクスポートに失敗しました: {e}"));
+                                                }
+                                            },
+                                            Err(e) => {
+                                                app.write().error_message = Some(format!("DB接続に失敗しました: {e}"));
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        app.write().error_message = Some(format!("出力先解決に失敗しました: {e}"));
+                                    }
+                                }
+                            },
+                            "📁 GnuCash 互換ファイル（.gnucash）をエクスポート"
+                        }
+                        button {
+                            class: "btn btn-secondary",
+                            onclick: move |_| {
+                                match auto_migrate_if_needed() {
+                                    Ok(Some(rep)) => {
+                                        let msg = format!(
+                                            "旧JSONから一括移行完了: {}年度（総仕訳{}件）",
+                                            rep.migrated_years.len(),
+                                            rep.total_entries
+                                        );
+                                        app.write().status_message = Some(msg);
+                                    }
+                                    Ok(None) => {
+                                        app.write().status_message = Some("移行対象の旧JSONファイルはありません。既に最新です。".into());
+                                    }
+                                    Err(e) => {
+                                        app.write().error_message = Some(format!("移行中にエラーが発生しました: {e}"));
+                                    }
+                                }
+                            },
+                            "🔄 旧年度別JSONデータから一括再移行"
+                        }
+                    }
+                }
+
+                // ---- Beancount (Plain Text Accounting) 連携 ----
+                div { class: "card",
+                    h2 { "Beancount プレーンテキスト会計 相互運用" }
+                    p { class: "muted",
+                        "オープンソースのプレーンテキスト会計規格「Beancount」形式でのエクスポートおよびインポートに対応しています。Gitでの行単位差分追跡や、Web UIツール「Fava」との連携が可能です。"
+                    }
+
+                    // Beancount エクスポート
+                    h3 { class: "subheading", "{fiscal_year}年 Beancountエクスポート" }
+                    div { class: "actions", style: "margin-bottom: 0.75rem;",
+                        button {
+                            class: "btn btn-primary",
+                            onclick: move |_| {
+                                let doc = app.read().to_document();
+                                let text = export_to_beancount(&doc);
+                                beancount_preview.set(text.clone());
+
+                                if let Ok(dir) = exports_dir() {
+                                    let path = dir.join(format!("{fiscal_year}_ledger.beancount"));
+                                    if let Ok(_) = std::fs::write(&path, text) {
+                                        app.write().status_message = Some(format!("Beancountファイルを保存しました: {}", path.display()));
+                                    }
+                                }
+                            },
+                            "📋 Beancountテキストを生成 & ファイル保存"
+                        }
+                    }
+                    if !beancount_preview.read().is_empty() {
+                        div { class: "field",
+                            label { "生成された Beancount プレビュー" }
+                            textarea {
+                                class: "csv-textarea",
+                                style: "min-height: 140px;",
+                                readonly: true,
+                                value: "{beancount_preview.read()}",
+                            }
+                        }
+                    }
+
+                    // Beancount インポート
+                    h3 { class: "subheading", style: "margin-top: 1.5rem;", "Beancountテキストのインポート" }
+                    p { class: "muted", style: "font-size: 0.85rem;",
+                        "Beancount形式のテキストを貼り付けると、{fiscal_year}年の仕訳として解析し、仕訳帳へ追加取り込みします。"
+                    }
+                    div { class: "field",
+                        textarea {
+                            class: "csv-textarea",
+                            placeholder: "2025-04-01 * \"取引先\" \"売上\"\n  Assets:Bank:SMBC  100000 JPY\n  Income:Sales     -100000 JPY",
+                            value: "{beancount_input}",
+                            oninput: move |evt| beancount_input.set(evt.value()),
+                        }
+                    }
+                    div { class: "actions", style: "margin-top: 0.75rem;",
+                        button {
+                            class: "btn btn-secondary",
+                            onclick: move |_| {
+                                let input_text = beancount_input.read().clone();
+                                if input_text.trim().is_empty() {
+                                    app.write().error_message = Some("Beancountテキストを入力してください".into());
+                                    return;
+                                }
+                                match import_from_beancount(&input_text, fiscal_year) {
+                                    Ok(entries) => {
+                                        if entries.is_empty() {
+                                            app.write().error_message = Some(format!("{fiscal_year}年に該当する有効な仕訳が見つかりませんでした"));
+                                            return;
+                                        }
+                                        let count = entries.len();
+                                        let mut doc = app.read().to_document();
+                                        doc.entries.extend(entries);
+                                        match save_year(&doc) {
+                                            Ok(_) => {
+                                                *app.write() = AppState::from_document(
+                                                    doc,
+                                                    Some(format!("Beancountから{count}件の仕訳を取り込みました")),
+                                                );
+                                                beancount_input.set(String::new());
+                                            }
+                                            Err(e) => {
+                                                app.write().error_message = Some(format!("保存に失敗しました: {e}"));
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        app.write().error_message = Some(format!("パースに失敗しました: {e}"));
+                                    }
+                                }
+                            },
+                            "📥 Beancountテキストを取り込み（仕訳帳へ追加）"
+                        }
+                    }
+                }
+            },
         }
+    }
+}
+
+fn format_file_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.2} MB", bytes as f64 / (1024.0 * 1024.0))
     }
 }

@@ -5,6 +5,7 @@ mod ui;
 use chrono::{Datelike, Local};
 use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
 use dioxus::prelude::*;
+use tax_return_application::core::auto_rule::{default_auto_rules, AutoBookingRule};
 use tax_return_application::core::deductions::TaxDeductions;
 use tax_return_application::core::depreciation::FixedAsset;
 use tax_return_application::core::journal::{
@@ -25,6 +26,7 @@ pub struct AppState {
     pub allocation_rules: Vec<AllocationRule>,
     pub fixed_assets: Vec<FixedAsset>,
     pub deductions: TaxDeductions,
+    pub auto_rules: Vec<AutoBookingRule>,
     pub status_message: Option<String>,
     pub error_message: Option<String>,
 }
@@ -43,6 +45,7 @@ impl AppState {
                 allocation_rules: Vec::new(),
                 fixed_assets: Vec::new(),
                 deductions: TaxDeductions::default(),
+                auto_rules: default_auto_rules(),
                 status_message: None,
                 error_message: Some(format!("起動時の読み込みに失敗しました: {e}")),
             },
@@ -59,6 +62,7 @@ impl AppState {
             allocation_rules: doc.allocation_rules,
             fixed_assets: doc.fixed_assets,
             deductions: doc.deductions,
+            auto_rules: doc.auto_rules,
             status_message: status,
             error_message: None,
         }
@@ -75,6 +79,7 @@ impl AppState {
             allocation_rules: self.allocation_rules.clone(),
             fixed_assets: self.fixed_assets.clone(),
             deductions: self.deductions.clone(),
+            auto_rules: self.auto_rules.clone(),
         }
     }
 }

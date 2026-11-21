@@ -5,11 +5,14 @@ use dioxus::prelude::*;
 use tax_return_application::core::deductions::{
     SpouseDeductionType, WidowOrSingleParentType,
 };
+use tax_return_application::core::etax::generate_etax_xml;
 use tax_return_application::core::journal::format_yen;
 use tax_return_application::core::tax_calc::{
     build_tax_report_with_deductions, BlueSpecialDeductionKind,
 };
-use tax_return_application::pdf::{export_blue_return_pdf, export_form_b_pdf};
+use tax_return_application::pdf::{
+    export_blue_return_official_pdf, export_form_b_official_pdf,
+};
 use tax_return_application::storage::{exports_dir, save_year};
 
 #[component]
@@ -717,38 +720,57 @@ pub fn ReportPage() -> Element {
         }
 
         div { class: "card",
-            h2 { "PDF出力" }
+            h2 { "帳票・電子申告出力（国税庁公式様式 & e-Tax XML）" }
             p { class: "muted",
-                "アプリデータフォルダの exports に PDF を保存します。日本語フォント（IPAゴシック等）が必要です。"
+                "国税庁提出用の公式レイアウトPDF（全ページ）および e-Tax ソフト・Web版取り込み用 XML ファイルを出力します。"
+            }
+
+            h3 { class: "subheading", "1. 国税庁公式様式 PDF 出力（提出品質）" }
+            p { class: "muted", style: "font-size: 0.85rem; margin-bottom: 0.75rem;",
+                "青色申告決算書（全4面: 損益計算書・月別売上仕入・減価償却地代家賃・貸借対照表）および確定申告書B（全2面: 収入所得控除税額計算・所得控除親族内訳）を出力します。"
             }
             div { class: "actions",
                 button {
                     class: "btn btn-primary",
                     onclick: move |_| {
-                        export_pdfs(app, ExportKind::Blue);
+                        export_official_pdfs(app, OfficialExportKind::Blue);
                     },
-                    "青色申告決算書 PDF"
+                    "青色申告決算書 PDF (公式全4面)"
                 }
                 button {
                     class: "btn btn-primary",
                     onclick: move |_| {
-                        export_pdfs(app, ExportKind::FormB);
+                        export_official_pdfs(app, OfficialExportKind::FormB);
                     },
-                    "確定申告書B PDF"
+                    "確定申告書B PDF (公式全2面)"
                 }
                 button {
                     class: "btn btn-secondary",
                     onclick: move |_| {
-                        export_pdfs(app, ExportKind::Both);
+                        export_official_pdfs(app, OfficialExportKind::Both);
                     },
-                    "両方出力"
+                    "公式帳票一括出力 (全6面)"
+                }
+            }
+
+            h3 { class: "subheading", style: "margin-top: 1.5rem;", "2. e-Tax 電子申告 XML 出力" }
+            p { class: "muted", style: "font-size: 0.85rem; margin-bottom: 0.75rem;",
+                "国税庁「e-Taxソフト」およびWEB版に直接インポート可能な .xml 形式ファイルを生成します。マイナンバーカードによる電子申告に対応します。"
+            }
+            div { class: "actions",
+                button {
+                    class: "btn btn-primary",
+                    onclick: move |_| {
+                        export_etax_file(app);
+                    },
+                    "e-Tax XML出力 (.xml)"
                 }
                 button {
                     class: "btn btn-secondary",
                     onclick: move |_| {
                         open_export_directory();
                     },
-                    "保存先フォルダを開く"
+                    "出力先フォルダを開く"
                 }
             }
         }
@@ -781,7 +803,7 @@ pub fn ReportPage() -> Element {
 }
 
 #[derive(Clone, Copy)]
-enum ExportKind {
+enum OfficialExportKind {
     Blue,
     FormB,
     Both,
@@ -794,14 +816,8 @@ fn persist_quiet(mut app: Signal<AppState>) {
     }
 }
 
-fn export_pdfs(mut app: Signal<AppState>, kind: ExportKind) {
-    let state = app.read().clone();
-    let report = build_tax_report_with_deductions(
-        &state.entries,
-        state.fiscal_year,
-        state.special_deduction,
-        &state.deductions,
-    );
+fn export_official_pdfs(mut app: Signal<AppState>, kind: OfficialExportKind) {
+    let doc = app.read().to_document();
 
     let dir = match exports_dir() {
         Ok(d) => d,
@@ -811,25 +827,25 @@ fn export_pdfs(mut app: Signal<AppState>, kind: ExportKind) {
         }
     };
 
-    let year = state.fiscal_year;
+    let year = doc.fiscal_year;
     let mut messages = Vec::new();
     let mut errors = Vec::new();
 
-    let do_blue = matches!(kind, ExportKind::Blue | ExportKind::Both);
-    let do_form = matches!(kind, ExportKind::FormB | ExportKind::Both);
+    let do_blue = matches!(kind, OfficialExportKind::Blue | OfficialExportKind::Both);
+    let do_form = matches!(kind, OfficialExportKind::FormB | OfficialExportKind::Both);
 
     if do_blue {
-        let path = dir.join(format!("{year}_青色申告決算書.pdf"));
-        match export_blue_return_pdf(&report.blue, &state.taxpayer, &path) {
-            Ok(p) => messages.push(format!("青色: {}", p.display())),
-            Err(e) => errors.push(format!("青色PDF: {e}")),
+        let path = dir.join(format!("{year}_青色申告決算書_公式全4面.pdf"));
+        match export_blue_return_official_pdf(&doc, &path) {
+            Ok(p) => messages.push(format!("青色決算書公式4面: {}", p.display())),
+            Err(e) => errors.push(format!("青色公式PDFエラー: {e}")),
         }
     }
     if do_form {
-        let path = dir.join(format!("{year}_確定申告書B.pdf"));
-        match export_form_b_pdf(&report.form_b, &state.taxpayer, &path) {
-            Ok(p) => messages.push(format!("申告書B: {}", p.display())),
-            Err(e) => errors.push(format!("申告書B PDF: {e}")),
+        let path = dir.join(format!("{year}_確定申告書B_公式全2面.pdf"));
+        match export_form_b_official_pdf(&doc, &path) {
+            Ok(p) => messages.push(format!("確定申告書B公式2面: {}", p.display())),
+            Err(e) => errors.push(format!("申告書B公式PDFエラー: {e}")),
         }
     }
 
@@ -839,7 +855,35 @@ fn export_pdfs(mut app: Signal<AppState>, kind: ExportKind) {
         state.status_message = None;
     } else {
         state.error_message = None;
-        state.status_message = Some(format!("PDFを出力しました: {}", messages.join(" , ")));
+        state.status_message = Some(format!("公式PDFを出力しました: {}", messages.join(" , ")));
+    }
+}
+
+fn export_etax_file(mut app: Signal<AppState>) {
+    let doc = app.read().to_document();
+    let dir = match exports_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            app.write().error_message = Some(format!("出力先を解決できません: {e}"));
+            return;
+        }
+    };
+
+    let year = doc.fiscal_year;
+    let xml_content = generate_etax_xml(&doc);
+    let path = dir.join(format!("{year}_e-tax_return.xml"));
+
+    match std::fs::write(&path, xml_content) {
+        Ok(_) => {
+            let mut state = app.write();
+            state.error_message = None;
+            state.status_message = Some(format!("e-Tax XMLファイルを出力しました: {}", path.display()));
+        }
+        Err(e) => {
+            let mut state = app.write();
+            state.status_message = None;
+            state.error_message = Some(format!("e-Tax XML出力に失敗しました: {e}"));
+        }
     }
 }
 

@@ -148,18 +148,18 @@ To systematically expand capabilities while maintaining codebase stability and t
   ├── Complete Income Tax Deductions (Social insurance, iDeCo, Life insurance, Medical, Donations) (Implemented)
   └── Mortgage Interest Tax Credit & Form B Expansion (Implemented)
        ↓
-[Phase 3: Single-File SQLite & GnuCash / Beancount Interoperability] (Next Milestone 🎯)
+[Phase 3: Single-File SQLite & GnuCash / Beancount Interoperability] (Completed ✅)
   ├── Single-file SQLite persistence (Consolidate all years and masters into one .sqlite/.gnucash)
   ├── GnuCash SQLite compatible schema integration (Direct inspection & interoperability)
   ├── Full compound transaction support (transactions + splits data model)
   ├── Beancount plain text export & import (Git diffs & Fava ecosystem)
   └── Automated one-click migration from legacy annual JSON files to SQLite
        ↓
-[Phase 4: Official PDF Overlays & e-Tax XML Export]
+[Phase 4: Official PDF Overlays & e-Tax XML Export] (Completed ✅)
   ├── Pixel-perfect overlay on official NTA blank PDF templates (Blue Return 1–4, Form B 1–2)
   └── e-Tax XML / .xtx file export generator for direct online filing
        ↓
-[Phase 5: Universal Financial CSV Import & Rule-Based Automation]
+[Phase 5: Universal Financial CSV Import & Rule-Based Automation] (Next Milestone 🎯)
   ├── Universal Bank / Credit Card CSV column mapper
   ├── Rule-based automated bookkeeping engine ("Keyword" -> Debit/Credit/Account)
   └── Multi-leg / split transaction UI (Compound entries)
@@ -207,32 +207,47 @@ To systematically expand capabilities while maintaining codebase stability and t
   - Added dedicated 4th tab "Fixed Assets & Depreciation" to `ClosingPage`.
   - Added interactive "Statutory Deductions & Tax Credits" settings card and complete 12-item itemized deduction breakdown table on `ReportPage`.
 
-### Phase 3: Single-File SQLite & GnuCash / Beancount Interoperability (Next Milestone 🎯)
+### Phase 3: Single-File SQLite & GnuCash / Beancount Interoperability (Completed ✅)
 - **Single-File SQLite Persistence (`rusqlite`)**:
   - Consolidate all fiscal years of journal entries, chart of accounts, sub-accounts, and taxpayer info into a single SQLite database file (e.g. `tax_return.sqlite` / `tax_return.gnucash`).
   - Back up and migrate the entire accounting history simply by handling a single file.
   - SQLite's B-Tree indexing and ACID transaction engine guarantee instantaneous querying across hundreds of thousands of entries.
+  - Uses `rusqlite` with `bundled` features to compile SQLite C code into the binary with zero external dependencies, upholding Single Binary Delivery.
 - **GnuCash Compatible Schema Integration**:
-  - Conform to GnuCash's standard relational design (`books`, `accounts`, `transactions`, `splits`, `slots`).
+  - Conform to GnuCash's standard relational design (`books`, `commodities`, `accounts`, `transactions`, `splits`, `slots`).
   - Directly open GnuCash-managed SQLite files within this app to generate official Japanese Form B and Blue Return financial reports.
   - Support full compound entries (multiple debits and credits under one transaction header) in the core domain model.
+  - One-click export to dedicated GnuCash `.gnucash` / `.sqlite` files anywhere on disk.
 - **Beancount Plain Text I/O**:
   - Export and import journal entries to and from `.beancount` plain text format with a single click.
+  - Automatic bidirectional mapping of Japanese accounts to standard Beancount structures (`Assets:Bank:...`, `Expenses:Business:...`, etc.).
   - Provide maximum portability for developers seeking line-by-line Git version control and integration with Fava web dashboards.
 - **Automated Migration from Legacy Storage**:
   - Auto-detect legacy per-year JSON files (schema v1–v3) and seamlessly convert all records into the single SQLite file.
+  - Read with SQLite priority (falling back to JSON and auto-migrating if needed) and write via transparent dual-write (SQLite primary + JSON backup) for utmost safety.
+- **UI Integration (ClosingPage Tab 5)**:
+  - Added dedicated 5th tab "Database & Storage Management" to `ClosingPage`.
+  - Live diagnostic metrics: SQLite connection path, registered fiscal years, total transactions, splits, and file size in KB.
+  - Actions for one-click legacy migration, GnuCash database export, Beancount plain-text export, and Beancount import.
 
-### Phase 4: Official PDF Overlays & e-Tax XML Export (Filing-Grade Quality)
+### Phase 4: Official PDF Overlays & e-Tax XML Export (Completed ✅)
 - **Official NTA PDF Template Imprinting**:
-  - Embed official National Tax Agency blank PDF forms via `include_bytes!`.
-  - Draw filled text and numbers onto the exact coordinates of official color templates:
-    - Blue Return Financial Statement: Page 1 (P&L), Page 2 (Monthly revenue & payroll), Page 3 (Depreciation & rent details), Page 4 (Balance sheet).
-    - Form B: Page 1 (Income, deductions, tax calculation), Page 2 (Breakdown of income, family details, local tax options).
-  - Produce filings ready for immediate print and mail submission to tax offices.
-- **e-Tax XML File Generation**:
-  - Format accounting and tax data into official NTA e-Tax XML structures, enabling users to upload their return directly to the e-Tax Web portal using a My Number card reader.
+  - Blue Return Financial Statement (Complete 4 Pages):
+    - Page 1: Profit and Loss Statement (Revenue, cost of sales, itemized expenses [11]–[31], special deduction [44], business net income [45]).
+    - Page 2: Monthly Breakdown of Revenue & Cost of Sales (Months 1–12 breakdown table, totals, payroll summary).
+    - Page 3: Depreciation Calculation & Home-Office Rent Details (Fixed asset depreciation schedule from asset register, rent allocation details).
+    - Page 4: Balance Sheet (Complete opening Jan 1 and closing Dec 31 asset, liability, and equity tables with full balance reconciliation).
+  - Form B (Complete 2 Pages):
+    - Page 1: First Face (Business revenue [ア], income [①][⑨], all 12 itemized statutory deductions [⑩]–[㉒], tax computation [㉓]–[㉝] including tax credits, income tax, reconstruction surtax, and final tax payable).
+    - Page 2: Second Face (Breakdown of income sources, social insurance deduction details, spouse/dependent deduction schedules, local tax options).
+  - Filing-grade print fidelity ready for submission to tax offices.
+- **e-Tax XML File Generation (`src/core/etax.rs`)**:
+  - Automatically formats accounting and tax data into official NTA e-Tax XML structures (`generate_etax_xml`).
+  - Covers taxpayer info, Form B data, and all 4 pages of the Blue Return financial statement with XML escaping and validation (`validate_etax_xml`).
+- **UI Integration (ReportPage)**:
+  - Added dedicated export actions for "Blue Return PDF (Official 4 Pages)", "Form B PDF (Official 2 Pages)", "All Official Forms (6 Pages)", and "e-Tax XML Export (.xml)".
 
-### Phase 5: Universal Financial CSV Import & Automation (Substantial UX Boost)
+### Phase 5: Universal Financial CSV Import & Automation (Next Milestone 🎯)
 - **Universal CSV Importer**:
   - Provide an interactive UI to map arbitrary CSV columns from any Japanese bank or credit card company (Date, Description, Withdrawal Amount, Deposit Amount).
 - **Automated Bookkeeping Rule Engine**:
@@ -251,6 +266,6 @@ To systematically expand capabilities while maintaining codebase stability and t
 
 ## 6. Summary & Recommended Next Actions
 
-With the completion of Phase 1 and **Phase 2 (Fixed Assets, Depreciation Engine, Complete Statutory Deductions & Tax Credits)**, the core tax accounting pipeline from daily journal entries to year-end depreciation, deductions, and official Form B calculation is fully implemented.
+With the completion of Phase 1, Phase 2, Phase 3, and **Phase 4 (Official NTA PDF Template Imprinting 6 Pages & e-Tax XML Generation)**, the entire tax return lifecycle—from daily bookkeeping to year-end depreciation, statutory deductions, physical paper submission, and electronic online filing via e-Tax—is now completely operational at filing-grade quality.
 
-The recommended next path is to proceed to **Phase 3: Single-File SQLite Modernization (GnuCash & Beancount Interoperability)** to unify multi-year storage into a single file and unlock broad open-source ecosystem compatibility.
+The recommended next path is to proceed to **Phase 5: Universal Financial CSV Import & Automation** to provide flexible banking/card CSV column mapping and rule-based automated transaction categorization.

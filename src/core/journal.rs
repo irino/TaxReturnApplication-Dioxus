@@ -1,5 +1,6 @@
 //! Journal structures, chart of accounts, sub-accounts, and bookkeeping validation.
 
+use crate::core::auto_rule::{default_auto_rules, AutoBookingRule};
 use crate::core::deductions::TaxDeductions;
 use crate::core::depreciation::FixedAsset;
 use chrono::{DateTime, Datelike, Local, NaiveDate};
@@ -372,6 +373,9 @@ pub struct LedgerDocument {
     /// 各種所得控除・税額控除設定
     #[serde(default)]
     pub deductions: TaxDeductions,
+    /// ルールベース自動仕訳ルール
+    #[serde(default = "default_auto_rules")]
+    pub auto_rules: Vec<AutoBookingRule>,
 }
 
 impl LedgerDocument {
@@ -386,6 +390,7 @@ impl LedgerDocument {
             allocation_rules: Vec::new(),
             fixed_assets: Vec::new(),
             deductions: TaxDeductions::default(),
+            auto_rules: default_auto_rules(),
         }
     }
 

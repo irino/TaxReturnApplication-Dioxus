@@ -3,6 +3,7 @@
 
 use crate::core::deductions::{compute_all_deductions, CalculatedDeductions, TaxDeductions};
 use crate::core::journal::{AccountCode, AccountNature, JournalEntry};
+use chrono::Datelike;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -344,6 +345,198 @@ pub fn build_tax_report(
     )
 }
 
+/// 月別売上・仕入の集計結果（青色申告決算書第2面用）。
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct MonthlyBreakdown {
+    pub monthly_sales: [i64; 12],
+    pub monthly_cogs: [i64; 12],
+    pub total_sales: i64,
+    pub total_cogs: i64,
+}
+
+/// 仕訳帳から各月（1〜12月）の売上および仕入（売上原価）を集計。
+pub fn aggregate_monthly_breakdown(entries: &[JournalEntry]) -> MonthlyBreakdown {
+    let mut mb = MonthlyBreakdown::default();
+    for e in entries {
+        let m = e.date.month() as usize;
+        if (1..=12).contains(&m) {
+            let idx = m - 1;
+            // 売上 (貸方売上はプラス、借方売上はマイナス/売上戻り)
+            if e.credit == AccountCode::Sales {
+                mb.monthly_sales[idx] += e.amount;
+            } else if e.debit == AccountCode::Sales {
+                mb.monthly_sales[idx] -= e.amount;
+            }
+
+            // 仕入 (借方仕入はプラス、貸方仕入はマイナス/仕入戻し)
+            if e.debit == AccountCode::CostOfSales {
+                mb.monthly_cogs[idx] += e.amount;
+            } else if e.credit == AccountCode::CostOfSales {
+                mb.monthly_cogs[idx] -= e.amount;
+            }
+        }
+    }
+    mb.total_sales = mb.monthly_sales.iter().sum();
+    mb.total_cogs = mb.monthly_cogs.iter().sum();
+    mb
+}
+
+/// 貸借対照表の行データ（期首・期末残高）。
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct BalanceSheetItem {
+    pub label: String,
+    pub opening: i64,
+    pub closing: i64,
+}
+
+/// 貸借対照表の完全集計（青色申告決算書第4面用）。
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct BalanceSheetBreakdown {
+    pub assets: Vec<BalanceSheetItem>,
+    pub total_assets_opening: i64,
+    pub total_assets_closing: i64,
+    pub liabilities: Vec<BalanceSheetItem>,
+    pub total_liabilities_opening: i64,
+    pub total_liabilities_closing: i64,
+    pub equity: Vec<BalanceSheetItem>,
+    pub total_equity_opening: i64,
+    pub total_equity_closing: i64,
+    pub total_liabilities_and_equity_opening: i64,
+    pub total_liabilities_and_equity_closing: i64,
+}
+
+/// 仕訳帳と特別控除前所得から貸借対照表（資産・負債・資本の部、期首1月1日および期末12月31日）を集計。
+pub fn aggregate_balance_sheet_breakdown(
+    entries: &[JournalEntry],
+    ordinary_income_before_deduction: i64,
+) -> BalanceSheetBreakdown {
+    let mut opening_raw: BTreeMap<AccountCode, i64> = BTreeMap::new();
+    let mut closing_raw: BTreeMap<AccountCode, i64> = BTreeMap::new();
+
+    for e in entries {
+        let is_opening = e.description.contains("繰越") || e.description.contains("期首");
+        if is_opening {
+            *opening_raw.entry(e.debit.clone()).or_default() += e.amount;
+            *opening_raw.entry(e.credit.clone()).or_default() -= e.amount;
+        }
+        *closing_raw.entry(e.debit.clone()).or_default() += e.amount;
+        *closing_raw.entry(e.credit.clone()).or_default() -= e.amount;
+    }
+
+    let get_bal = |map: &BTreeMap<AccountCode, i64>, code: &AccountCode| -> i64 {
+        let signed = map.get(code).copied().unwrap_or(0);
+        match code.nature() {
+            AccountNature::Asset => signed,
+            AccountNature::Liability | AccountNature::Equity => -signed,
+            AccountNature::Income | AccountNature::Expense => 0,
+        }
+    };
+
+    // 資産の部
+    let asset_codes = [
+        (AccountCode::Cash, "現金"),
+        (AccountCode::Bank, "普通預金"),
+        (AccountCode::AccountsReceivable, "売掛金"),
+        (AccountCode::Drawings, "事業主貸"),
+    ];
+
+    let mut assets = Vec::new();
+    let mut total_assets_opening = 0;
+    let mut total_assets_closing = 0;
+
+    for (code, label) in asset_codes {
+        let op = get_bal(&opening_raw, &code);
+        let cl = get_bal(&closing_raw, &code);
+        assets.push(BalanceSheetItem {
+            label: label.to_string(),
+            opening: op,
+            closing: cl,
+        });
+        total_assets_opening += op;
+        total_assets_closing += cl;
+    }
+
+    // カスタム資産科目の追加
+    for (code, _) in closing_raw.iter().chain(opening_raw.iter()) {
+        if matches!(code, AccountCode::Custom(_)) && code.nature() == AccountNature::Asset {
+            if !assets.iter().any(|a| a.label == code.label_ja()) {
+                let op = get_bal(&opening_raw, code);
+                let cl = get_bal(&closing_raw, code);
+                assets.push(BalanceSheetItem {
+                    label: code.label_ja().to_string(),
+                    opening: op,
+                    closing: cl,
+                });
+                total_assets_opening += op;
+                total_assets_closing += cl;
+            }
+        }
+    }
+
+    // 負債の部
+    let liability_codes = [
+        (AccountCode::AccountsPayable, "買掛金"),
+    ];
+    let mut liabilities = Vec::new();
+    let mut total_liabilities_opening = 0;
+    let mut total_liabilities_closing = 0;
+
+    for (code, label) in liability_codes {
+        let op = get_bal(&opening_raw, &code);
+        let cl = get_bal(&closing_raw, &code);
+        liabilities.push(BalanceSheetItem {
+            label: label.to_string(),
+            opening: op,
+            closing: cl,
+        });
+        total_liabilities_opening += op;
+        total_liabilities_closing += cl;
+    }
+
+    // 資本（純資産）の部
+    let mut equity = Vec::new();
+    let op_cap = get_bal(&opening_raw, &AccountCode::Capital);
+    let cl_cap = get_bal(&closing_raw, &AccountCode::Capital);
+    let op_contrib = get_bal(&opening_raw, &AccountCode::OwnerContribution);
+    let cl_contrib = get_bal(&closing_raw, &AccountCode::OwnerContribution);
+
+    equity.push(BalanceSheetItem {
+        label: "元入金".into(),
+        opening: op_cap,
+        closing: cl_cap,
+    });
+    equity.push(BalanceSheetItem {
+        label: "事業主借".into(),
+        opening: op_contrib,
+        closing: cl_contrib,
+    });
+    equity.push(BalanceSheetItem {
+        label: "青色申告特別控除前の所得金額".into(),
+        opening: 0,
+        closing: ordinary_income_before_deduction,
+    });
+
+    let total_equity_opening = op_cap + op_contrib;
+    let total_equity_closing = cl_cap + cl_contrib + ordinary_income_before_deduction;
+
+    let total_liabilities_and_equity_opening = total_liabilities_opening + total_equity_opening;
+    let total_liabilities_and_equity_closing = total_liabilities_closing + total_equity_closing;
+
+    BalanceSheetBreakdown {
+        assets,
+        total_assets_opening,
+        total_assets_closing,
+        liabilities,
+        total_liabilities_opening,
+        total_liabilities_closing,
+        equity,
+        total_equity_opening,
+        total_equity_closing,
+        total_liabilities_and_equity_opening,
+        total_liabilities_and_equity_closing,
+    }
+}
+
 // ---- Backward-compatible helper used by older call sites / tests ----
 
 /// Convenience wrapper: 10万円控除で青色集計（旧 API 互換）。
@@ -591,6 +784,57 @@ mod tests {
             report.form_b.total_income_tax,
             158_500 + report.form_b.reconstruction_surtax
         );
+    }
+
+    #[test]
+    fn test_monthly_and_balance_sheet_breakdown() {
+        let entries = vec![
+            JournalEntry::new(
+                chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+                AccountCode::Bank,
+                AccountCode::Capital,
+                1_000_000,
+                "前年度より繰越（期首残高）",
+            ),
+            JournalEntry::new(
+                chrono::NaiveDate::from_ymd_opt(2025, 1, 15).unwrap(),
+                AccountCode::Bank,
+                AccountCode::Sales,
+                300_000,
+                "1月売上",
+            ),
+            JournalEntry::new(
+                chrono::NaiveDate::from_ymd_opt(2025, 2, 20).unwrap(),
+                AccountCode::CostOfSales,
+                AccountCode::Bank,
+                100_000,
+                "2月仕入",
+            ),
+            JournalEntry::new(
+                chrono::NaiveDate::from_ymd_opt(2025, 12, 10).unwrap(),
+                AccountCode::Drawings,
+                AccountCode::Bank,
+                50_000,
+                "生活費引き出し",
+            ),
+        ];
+
+        let mb = aggregate_monthly_breakdown(&entries);
+        assert_eq!(mb.monthly_sales[0], 300_000); // 1月
+        assert_eq!(mb.monthly_sales[1], 0);
+        assert_eq!(mb.total_sales, 300_000);
+        assert_eq!(mb.monthly_cogs[1], 100_000); // 2月
+        assert_eq!(mb.total_cogs, 100_000);
+
+        let bs = aggregate_balance_sheet_breakdown(&entries, 200_000);
+        assert_eq!(bs.total_assets_opening, 1_000_000); // 期首普通預金
+        // 期末普通預金: 1,000,000 + 300,000 - 100,000 - 50,000 = 1,150,000
+        // 期末事業主貸: 50,000
+        // 期末資産合計: 1,200,000
+        assert_eq!(bs.total_assets_closing, 1_200_000);
+        assert_eq!(bs.total_liabilities_and_equity_opening, 1_000_000);
+        // 期末元入金 1,000,000 + 所得 200,000 = 1,200,000
+        assert_eq!(bs.total_liabilities_and_equity_closing, 1_200_000);
     }
 }
 

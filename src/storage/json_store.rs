@@ -2,6 +2,7 @@
 
 use crate::core::journal::LedgerDocument;
 use crate::storage::paths::{ledgers_dir, PathError};
+use crate::storage::sqlite_store::SqliteError;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -15,21 +16,54 @@ pub enum StorageError {
     Io(#[from] io::Error),
     #[error("JSONエラー: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("SQLiteエラー: {0}")]
+    Sqlite(#[from] SqliteError),
 }
 
 fn year_path(dir: &Path, year: i32) -> PathBuf {
     dir.join(format!("{year}.json"))
 }
 
-/// Load a fiscal year from the default app data directory.
-/// Missing file → empty document for that year.
+/// Load a fiscal year from SQLite (with automatic migration from legacy JSON if needed).
+/// Missing records → empty document for that year.
 pub fn load_year(year: i32) -> Result<LedgerDocument, StorageError> {
-    load_year_from_dir(&ledgers_dir()?, year)
+    let sqlite_file = crate::storage::sqlite_store::sqlite_db_path()?;
+    if sqlite_file.exists() {
+        let conn = crate::storage::sqlite_store::open_sqlite_connection(&sqlite_file)?;
+        let doc = crate::storage::sqlite_store::load_year_from_sqlite(&conn, year)?;
+        if !doc.entries.is_empty() || doc.taxpayer != crate::core::journal::TaxpayerInfo::default() {
+            return Ok(doc);
+        }
+    }
+
+    // SQLiteにデータがない場合、レガシーJSONを確認
+    let dir = ledgers_dir()?;
+    let path = year_path(&dir, year);
+    if path.exists() {
+        // レガシーJSONが存在する場合はロードし、SQLiteへ移行保存
+        let doc = load_year_from_dir(&dir, year)?;
+        if let Ok(mut conn) = crate::storage::sqlite_store::open_sqlite_connection(&sqlite_file) {
+            let _ = crate::storage::sqlite_store::save_year_to_sqlite(&mut conn, &doc);
+        }
+        return Ok(doc);
+    }
+
+    Ok(LedgerDocument::new(year))
 }
 
-/// Save a fiscal year into the default app data directory (atomic write).
+/// Save a fiscal year into SQLite (primary) and JSON (backup).
 pub fn save_year(doc: &LedgerDocument) -> Result<(), StorageError> {
-    save_year_to_dir(&ledgers_dir()?, doc)
+    // 1. SQLite単一ファイルへ保存
+    let sqlite_file = crate::storage::sqlite_store::sqlite_db_path()?;
+    let mut conn = crate::storage::sqlite_store::open_sqlite_connection(&sqlite_file)?;
+    crate::storage::sqlite_store::save_year_to_sqlite(&mut conn, doc)?;
+
+    // 2. レガシーJSONファイルへも保存（バックアップ互換性）
+    if let Ok(dir) = ledgers_dir() {
+        let _ = save_year_to_dir(&dir, doc);
+    }
+
+    Ok(())
 }
 
 /// Load from an explicit ledgers directory (testable).
