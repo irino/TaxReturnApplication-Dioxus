@@ -79,6 +79,7 @@ pub fn ClosingPage() -> Element {
     let mut new_rule_match_type = use_signal(|| RuleMatchType::Contains);
     let mut new_rule_account = use_signal(|| AccountCode::Supplies);
     let mut new_rule_sub = use_signal(|| String::new());
+    let mut new_rule_priority = use_signal(|| 0i32);
     let mut rule_error = use_signal(|| Option::<String>::None);
 
     let state = app.read().clone();
@@ -87,6 +88,7 @@ pub fn ClosingPage() -> Element {
     let global_error = state.error_message.clone();
 
     let accounts_list = state.accounts.clone();
+    let auto_rules_list = state.auto_rules.clone();
     let doc_snapshot = state.to_document();
     let dep_calcs = calculate_all_depreciations(&doc_snapshot);
     let total_dep_cost: i64 = dep_calcs.iter().map(|c| c.acquisition_cost).sum();
@@ -1176,6 +1178,251 @@ pub fn ClosingPage() -> Element {
                                 }
                             },
                             "📥 Beancountテキストを取り込み（仕訳帳へ追加）"
+                        }
+                    }
+                }
+            },
+            ClosingTab::AutoRules => rsx! {
+                // ---- 自動仕訳ルール設定 ----
+                div { class: "card",
+                    h2 { "自動仕訳ルールの新規作成" }
+                    p { class: "muted",
+                        "銀行明細やクレジットカード明細の摘要に含まれるキーワードから、勘定科目を自動推論して仕訳を生成します。"
+                    }
+
+                    if let Some(err) = rule_error.read().clone() {
+                        div { class: "error-banner", "{err}" }
+                    }
+
+                    div { class: "form-grid",
+                        div { class: "field",
+                            label { "ルール名" }
+                            input {
+                                r#type: "text",
+                                placeholder: "例: Amazon 消耗品費, Suica 交通費",
+                                value: "{new_rule_name}",
+                                oninput: move |evt| new_rule_name.set(evt.value()),
+                            }
+                        }
+                        div { class: "field",
+                            label { "判定キーワード（マッチ対象）" }
+                            input {
+                                r#type: "text",
+                                placeholder: "例: Amazon, Suica, Google, 電気",
+                                value: "{new_rule_pattern}",
+                                oninput: move |evt| new_rule_pattern.set(evt.value()),
+                            }
+                        }
+                        div { class: "field",
+                            label { "一致条件" }
+                            select {
+                                value: "{new_rule_match_type.read().label_ja()}",
+                                onchange: move |evt| {
+                                    match evt.value().as_str() {
+                                        "前方一致" => new_rule_match_type.set(RuleMatchType::StartsWith),
+                                        "完全一致" => new_rule_match_type.set(RuleMatchType::Exact),
+                                        _ => new_rule_match_type.set(RuleMatchType::Contains),
+                                    }
+                                },
+                                option { value: "部分一致", "部分一致（キーワードを含む）" }
+                                option { value: "前方一致", "前方一致（キーワードから始まる）" }
+                                option { value: "完全一致", "完全一致" }
+                            }
+                        }
+                        div { class: "field",
+                            label { "割り当てる勘定科目" }
+                            select {
+                                onchange: move |evt| {
+                                    let state = app.read();
+                                    if let Some(acc) = state.accounts.iter().find(|a| a.name == evt.value()) {
+                                        new_rule_account.set(acc.code.clone());
+                                    }
+                                },
+                                for acc in accounts_list.iter() {
+                                    option {
+                                        value: "{acc.name}",
+                                        selected: *new_rule_account.read() == acc.code,
+                                        "{acc.name} ({acc.nature.label_ja()})"
+                                    }
+                                }
+                            }
+                        }
+                        div { class: "field",
+                            label { "補助科目（任意）" }
+                            input {
+                                r#type: "text",
+                                placeholder: "例: 書籍, クラウドサービス (省略可)",
+                                value: "{new_rule_sub}",
+                                oninput: move |evt| new_rule_sub.set(evt.value()),
+                            }
+                        }
+                        div { class: "field",
+                            label { "優先度（数値が大きいほど優先）" }
+                            input {
+                                r#type: "number",
+                                value: "{new_rule_priority}",
+                                oninput: move |evt| {
+                                    if let Ok(v) = evt.value().parse::<i32>() {
+                                        new_rule_priority.set(v);
+                                    }
+                                },
+                            }
+                        }
+                    }
+
+                    div { class: "actions", style: "margin-top: 0.8rem; display: flex; gap: 0.5rem;",
+                        button {
+                            class: "btn btn-primary",
+                            onclick: move |_| {
+                                rule_error.set(None);
+                                let name = new_rule_name.read().trim().to_string();
+                                let pattern = new_rule_pattern.read().trim().to_string();
+                                if name.is_empty() {
+                                    rule_error.set(Some("ルール名を入力してください".into()));
+                                    return;
+                                }
+                                if pattern.is_empty() {
+                                    rule_error.set(Some("判定キーワードを入力してください".into()));
+                                    return;
+                                }
+                                let match_type = *new_rule_match_type.read();
+                                let target_account = new_rule_account.read().clone();
+                                let sub_raw = new_rule_sub.read().trim().to_string();
+                                let target_sub = if sub_raw.is_empty() { None } else { Some(sub_raw) };
+                                let priority = *new_rule_priority.read();
+
+                                let mut rule = AutoBookingRule::new(name.clone(), pattern, target_account, target_sub);
+                                rule.match_type = match_type;
+                                rule.priority = priority;
+
+                                let mut doc = app.read().to_document();
+                                doc.auto_rules.push(rule);
+
+                                if let Err(e) = save_year(&doc) {
+                                    app.write().error_message = Some(format!("保存に失敗しました: {e}"));
+                                } else {
+                                    *app.write() = AppState::from_document(
+                                        doc,
+                                        Some(format!("自動仕訳ルール「{name}」を登録しました")),
+                                    );
+                                    new_rule_name.set(String::new());
+                                    new_rule_pattern.set(String::new());
+                                    new_rule_sub.set(String::new());
+                                    new_rule_priority.set(0);
+                                }
+                            },
+                            "➕ 自動仕訳ルールを登録"
+                        }
+                        button {
+                            class: "btn btn-secondary",
+                            onclick: move |_| {
+                                let mut doc = app.read().to_document();
+                                doc.auto_rules = default_auto_rules();
+                                if let Err(e) = save_year(&doc) {
+                                    app.write().error_message = Some(format!("保存に失敗しました: {e}"));
+                                } else {
+                                    *app.write() = AppState::from_document(
+                                        doc,
+                                        Some("自動仕訳ルールを標準プリセット（30+件）にリセットしました".into()),
+                                    );
+                                }
+                            },
+                            "🔄 標準ルールセット（30+件）に初期化"
+                        }
+                    }
+                }
+
+                div { class: "card",
+                    div { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem;",
+                        h2 { style: "margin: 0;", "登録済み自動仕訳ルール一覧（{auto_rules_list.len()} 件）" }
+                    }
+                    div { class: "table-container",
+                        table { class: "data-table",
+                            thead {
+                                tr {
+                                    th { style: "width: 60px;", "有効" }
+                                    th { style: "width: 70px;", "優先度" }
+                                    th { "ルール名" }
+                                    th { "判定キーワード" }
+                                    th { "条件" }
+                                    th { "割当勘定科目" }
+                                    th { "補助科目" }
+                                    th { style: "text-align: right; width: 80px;", "操作" }
+                                }
+                            }
+                            tbody {
+                                for rule in auto_rules_list.iter() {
+                                    {
+                                        let rule_id = rule.id.clone();
+                                        let rule_id_for_delete = rule.id.clone();
+                                        let rule_name = rule.name.clone();
+                                        let is_active = rule.is_active;
+                                        rsx! {
+                                            tr {
+                                                key: "{rule.id}",
+                                                td {
+                                                    input {
+                                                        r#type: "checkbox",
+                                                        checked: is_active,
+                                                        onchange: move |_| {
+                                                            let mut doc = app.read().to_document();
+                                                            if let Some(r) = doc.auto_rules.iter_mut().find(|r| r.id == rule_id) {
+                                                                r.is_active = !r.is_active;
+                                                            }
+                                                            if let Err(e) = save_year(&doc) {
+                                                                app.write().error_message = Some(format!("保存に失敗しました: {e}"));
+                                                            } else {
+                                                                *app.write() = AppState::from_document(doc, None);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                td {
+                                                    span { class: "badge badge-neutral", "{rule.priority}" }
+                                                }
+                                                td {
+                                                    strong { style: if !is_active { "color: var(--muted); text-decoration: line-through;" } else { "" }, "{rule.name}" }
+                                                }
+                                                td {
+                                                    code { style: "background: var(--bg-code, #f0f4f8); padding: 0.15rem 0.4rem; border-radius: 4px;", "{rule.pattern}" }
+                                                }
+                                                td {
+                                                    span { class: "badge badge-info", "{rule.match_type.label_ja()}" }
+                                                }
+                                                td {
+                                                    span { class: "badge badge-expense", "{rule.target_account.label_ja()}" }
+                                                }
+                                                td {
+                                                    if let Some(sub) = &rule.target_sub_account {
+                                                        span { class: "sub-badge", "{sub}" }
+                                                    } else {
+                                                        span { class: "muted", "-" }
+                                                    }
+                                                }
+                                                td { style: "text-align: right;",
+                                                    button {
+                                                        class: "btn btn-danger btn-sm",
+                                                        title: "ルールを削除",
+                                                        onclick: move |_| {
+                                                            let mut doc = app.read().to_document();
+                                                            doc.auto_rules.retain(|r| r.id != rule_id_for_delete);
+                                                            if let Err(e) = save_year(&doc) {
+                                                                app.write().error_message = Some(format!("保存に失敗しました: {e}"));
+                                                            } else {
+                                                                *app.write() = AppState::from_document(
+                                                                    doc,
+                                                                    Some(format!("ルール「{rule_name}」を削除しました")),
+                                                                );
+                                                            }
+                                                        },
+                                                        "削除"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

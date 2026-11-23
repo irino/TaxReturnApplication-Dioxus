@@ -159,12 +159,13 @@ To systematically expand capabilities while maintaining codebase stability and t
   ├── Pixel-perfect overlay on official NTA blank PDF templates (Blue Return 1–4, Form B 1–2)
   └── e-Tax XML / .xtx file export generator for direct online filing
        ↓
-[Phase 5: Universal Financial CSV Import & Rule-Based Automation] (Next Milestone 🎯)
-  ├── Universal Bank / Credit Card CSV column mapper
-  ├── Rule-based automated bookkeeping engine ("Keyword" -> Debit/Credit/Account)
-  └── Multi-leg / split transaction UI (Compound entries)
+[Phase 5: Universal Financial CSV Import & Rule-Based Automation] (Completed ✅)
+  ├── Universal Bank / Credit Card CSV column mapper (dual-col, single-col ±, and card presets)
+  ├── Rule-based automated bookkeeping engine (keyword contains/starts-with/exact, 30+ built-ins, priority resolution)
+  ├── Automated booking rules management UI (custom rules, active toggle, priority, reset to defaults)
+  └── Multi-leg / split transaction UI (Compound entries with real-time balance validation)
        ↓
-[Phase 6: Invoice System, Consumption Tax & Business Analytics]
+[Phase 6: Invoice System, Consumption Tax & Business Analytics] (Next Milestone 🎯)
   ├── Consumption tax rates (10% / 8%), Invoice T-number management
   ├── Simplified taxation, general taxation, and 20% transitional tax calculations
   └── Monthly revenue trend charts and cash flow analytics
@@ -247,14 +248,24 @@ To systematically expand capabilities while maintaining codebase stability and t
 - **UI Integration (ReportPage)**:
   - Added dedicated export actions for "Blue Return PDF (Official 4 Pages)", "Form B PDF (Official 2 Pages)", "All Official Forms (6 Pages)", and "e-Tax XML Export (.xml)".
 
-### Phase 5: Universal Financial CSV Import & Automation (Next Milestone 🎯)
-- **Universal CSV Importer**:
-  - Provide an interactive UI to map arbitrary CSV columns from any Japanese bank or credit card company (Date, Description, Withdrawal Amount, Deposit Amount).
-- **Automated Bookkeeping Rule Engine**:
-  - Allow users to establish rules such as: *If description contains "東京電力", set Debit = Utilities, Credit = Bank*.
-  - Bulk-categorize transaction records, slashing daily bookkeeping time by 90%.
+### Phase 5: Universal Financial CSV Import & Rule-Based Automation (Completed ✅)
+- **Universal CSV Importer (`src/core/universal_csv.rs`)**:
+  - Ingest statements from major Japanese banks (MUFG, SMBC, Mizuho, Yuucho, Rakuten Bank) and credit cards (Rakuten Card, SMBC Card).
+  - Built-in presets for Dual-Column (Withdrawal/Deposit), Single-Column with signs (±), and Credit Card spending formats.
+  - Dynamically configurable base accounts (e.g., Bank, Accounts Payable) and sub-accounts (e.g., "Rakuten Bank", "Rakuten Card").
+- **Automated Bookkeeping Rule Engine (`src/core/auto_rule.rs`)**:
+  - High-precision matching engine supporting substring containment, prefix matching, and exact matching, resolved by user-defined priority and pattern length specificity.
+  - Over 30 built-in rules for ubiquitous Japanese merchants and tech services (Amazon, Suica/PASMO, JR, NTT, KDDI, Google Cloud, AWS, GitHub, OpenAI, Tokyo Electric, Gas, etc.).
+  - Safely falls back to base accounts for unknown vendors, tagging auto-classified entries with matching rule badges.
+- **UI Integration & Rule Management**:
+  - Dedicated 6th tab "Automated Booking Rules" in `ClosingPage`: create custom keywords, toggle rule activation, adjust priority numbers, and restore standard defaults.
+  - "⚡ Bank & Card CSV Auto-Import" modal in `LedgerPage`: select CSV file or paste text, preview parsed rows, auto-classified badges, total deposits/withdrawals, and import all with one click.
+- **Compound Transaction (諸口仕訳) UI (`src/core/compound.rs` & `src/ui/ledger.rs`)**:
+  - Dedicated "📑 Compound Transaction" mode in `LedgerPage`.
+  - Dynamically add, remove, and edit split rows (Debit/Credit, Account, Sub-Account, Amount, Memo).
+  - Real-time balance calculator displaying total debits, total credits, and difference, with safe validation enforcing $\sum \text{debits} == \sum \text{credits}$.
 
-### Phase 6: Invoice System, Consumption Tax Filing & Business Analytics (Reaching Commercial Parity)
+### Phase 6: Invoice System, Consumption Tax Filing & Business Analytics (Next Milestone 🎯)
 - **Consumption Tax Engine**:
   - Track 10% standard, 8% reduced, and tax-exempt transactions for qualified invoice issuers.
   - Compute tax returns under both Simplified Taxation (みなし仕入率) and the 20% Special Rule (2割特例) for small businesses.
@@ -266,6 +277,6 @@ To systematically expand capabilities while maintaining codebase stability and t
 
 ## 6. Summary & Recommended Next Actions
 
-With the completion of Phase 1, Phase 2, Phase 3, and **Phase 4 (Official NTA PDF Template Imprinting 6 Pages & e-Tax XML Generation)**, the entire tax return lifecycle—from daily bookkeeping to year-end depreciation, statutory deductions, physical paper submission, and electronic online filing via e-Tax—is now completely operational at filing-grade quality.
+With the completion of Phase 1, Phase 2, Phase 3, Phase 4, and **Phase 5 (Universal Financial CSV Import, Rule-Based Automated Bookkeeping, Auto-Rule Management, and Compound Transaction UI)**, users can now import banking and credit card statements with automated classification, record complex multi-split transactions, carry forward balances, manage depreciation and deductions, imprint official 6-page NTA tax forms, and export e-Tax XML for electronic filing.
 
-The recommended next path is to proceed to **Phase 5: Universal Financial CSV Import & Automation** to provide flexible banking/card CSV column mapping and rule-based automated transaction categorization.
+The recommended next path is to proceed to **Phase 6: Invoice System, Consumption Tax Filing & Business Analytics** to introduce qualified invoice management, consumption tax calculations (Simplified & 20% transitional rule), and interactive monthly financial dashboards.
