@@ -165,10 +165,11 @@ To systematically expand capabilities while maintaining codebase stability and t
   ├── Automated booking rules management UI (custom rules, active toggle, priority, reset to defaults)
   └── Multi-leg / split transaction UI (Compound entries with real-time balance validation)
        ↓
-[Phase 6: Invoice System, Consumption Tax & Business Analytics] (Next Milestone 🎯)
-  ├── Consumption tax rates (10% / 8%), Invoice T-number management
-  ├── Simplified taxation, general taxation, and 20% transitional tax calculations
-  └── Monthly revenue trend charts and cash flow analytics
+[Phase 6: Invoice System, Consumption Tax & Business Analytics] (Completed ✅)
+  ├── Consumption tax categories (10% / 8% / Exempt / Non-taxable) & Qualified Invoice T-number validation
+  ├── Statutory calculation for General, Simplified (Types 1–6), and 20% Special Rule with simulation optimizer
+  ├── Official Consumption Tax and Local Consumption Tax Declaration Statement PDF generation
+  └── Management Analytics Dashboard (SVG monthly revenue/expense trend charts, gross/operating margin KPIs, expense breakdown ranking, cashflow monitoring)
 ```
 
 ---
@@ -265,18 +266,35 @@ To systematically expand capabilities while maintaining codebase stability and t
   - Dynamically add, remove, and edit split rows (Debit/Credit, Account, Sub-Account, Amount, Memo).
   - Real-time balance calculator displaying total debits, total credits, and difference, with safe validation enforcing $\sum \text{debits} == \sum \text{credits}$.
 
-### Phase 6: Invoice System, Consumption Tax Filing & Business Analytics (Next Milestone 🎯)
-- **Consumption Tax Engine**:
-  - Track 10% standard, 8% reduced, and tax-exempt transactions for qualified invoice issuers.
-  - Compute tax returns under both Simplified Taxation (みなし仕入率) and the 20% Special Rule (2割特例) for small businesses.
-  - Generate official Consumption Tax and Local Consumption Tax return PDFs.
-- **Visual Analytics Dashboard**:
-  - Interactive SVG/Canvas charts for monthly revenue trends, expense breakdown ratios, and year-over-year comparisons.
+### Phase 6: Invoice System, Consumption Tax Filing & Business Analytics (Completed ✅)
+- **Consumption Tax Engine (`src/core/consumption_tax.rs`)**:
+  - Taxable business flag, Qualified Invoice Issuer Registration Number (T + 13 digits) management with format validation.
+  - Tax categories: 10% standard, 8% reduced (food, newspapers), Tax-exempt, and Non-taxable (salaries, taxes, equity), with automated account and keyword inference.
+  - **Full Statutory Support for 3 Major Calculation Regimes**:
+    1. **General (Actual Input Deduction)**: Total output tax minus actual input tax on allowable business expenses and assets.
+    2. **Simplified Taxation**: Deemed purchase ratios by business classification (Type 1 Wholesale 90%, Type 2 Retail 80%, Type 3 Manufacturing/IT contracting 70%, Type 4 Dining 60%, Type 5 Services/Consulting 50%, Type 6 Real Estate 40%).
+    3. **Small-Business 20% Special Rule (2割特例)**: Transformed small businesses remit only 20% of their output tax liability.
+  - Statutory rounding: Tax base truncated to 1,000 JPY, National tax (7.8% / 6.24%) and Local consumption tax (22/78) truncated to 100 JPY.
+  - **Multi-Method Simulation Optimizer**: Simultaneously computes tax payable across all three regimes, automatically highlighting the method that minimizes total tax liability.
+- **Consumption Tax Statement PDF Generation (`src/pdf/consumption_tax_pdf.rs`)**:
+  - Formats and generates A4 official calculation statements with taxpayer identity, invoice registration number, tax breakdown, and simulation comparison table.
+- **Managerial Analytics Dashboard (`src/core/analytics.rs` & `src/ui/analytics.rs`)**:
+  - Added dedicated "📊 Business Analytics" tab (`Route::Analytics`) to the app sidebar.
+  - **KPI Summary Cards**: Annual Gross Revenue, Gross Profit & Gross Margin (%), Annual Expenses & Largest Expense Account, Net Business Income & Operating Margin (%), Ending Cash & Bank Balance, Receivables/Payables.
+  - **Monthly Trend Charts (SVG)**: 12-month pure Rust SVG chart displaying revenue bars (blue), expense bars (red), and net operating income plots (green).
+  - **Expense Breakdown Rankings**: Top expense categories with dynamic percentage progress bars.
+  - **Quarterly Performance**: Revenue, operating income, and profit margin breakdown across Q1–Q4.
+  - **Monthly Financial Ledger Table**: Comprehensive monthly audit table detailing monthly revenues, cost of sales, gross profit, expenses, net income, cash inflows, cash outflows, and net cash movement.
 
 ---
 
 ## 6. Summary & Recommended Next Actions
 
-With the completion of Phase 1, Phase 2, Phase 3, Phase 4, and **Phase 5 (Universal Financial CSV Import, Rule-Based Automated Bookkeeping, Auto-Rule Management, and Compound Transaction UI)**, users can now import banking and credit card statements with automated classification, record complex multi-split transactions, carry forward balances, manage depreciation and deductions, imprint official 6-page NTA tax forms, and export e-Tax XML for electronic filing.
+With the completion of Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, and **Phase 6 (Qualified Invoice System, 3-Regime Consumption Tax Engine, Optimization Simulator, Statement PDF Generation, and Management Analytics Dashboard)**, the application has achieved complete parity with commercial cloud accounting platforms (freee, MoneyForward) while operating 100% locally as a single compiled Rust binary with zero cloud dependencies or recurring subscription fees:
 
-The recommended next path is to proceed to **Phase 6: Invoice System, Consumption Tax Filing & Business Analytics** to introduce qualified invoice management, consumption tax calculations (Simplified & 20% transitional rule), and interactive monthly financial dashboards.
+1. **Daily Operations**: Universal bank and card CSV import with automated keyword classification, multi-split compound entry UI.
+2. **Bookkeeping & Closing**: Custom accounts, sub-accounts, home-office expense allocation, asset register with auto-depreciation, full statutory deductions & tax credits.
+3. **Data Integrity & Interoperability**: Single-file SQLite database, GnuCash relational schema interoperability, Beancount plain-text Git versioning, and seamless fiscal rollover.
+4. **Official Filing**: Precise NTA PDF overlays for 6 full official forms (Blue Return 1–4, Form B 1–2) and validated e-Tax XML generation.
+5. **Invoice & Consumption Tax**: Qualified invoice T-number validation, statutory tax computation (General, Simplified, 2割特例), multi-method tax minimization simulation, and statement PDF export.
+6. **Executive Insights**: Interactive SVG financial dashboard, expense breakdown ranking, quarterly performance, and cashflow tracking.

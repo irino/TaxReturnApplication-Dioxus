@@ -2,6 +2,7 @@
 
 use crate::AppState;
 use dioxus::prelude::*;
+use tax_return_application::core::consumption_tax::calculate_consumption_tax;
 use tax_return_application::core::deductions::{
     SpouseDeductionType, WidowOrSingleParentType,
 };
@@ -11,7 +12,7 @@ use tax_return_application::core::tax_calc::{
     build_tax_report_with_deductions, BlueSpecialDeductionKind,
 };
 use tax_return_application::pdf::{
-    export_blue_return_official_pdf, export_form_b_official_pdf,
+    export_blue_return_official_pdf, export_consumption_tax_pdf, export_form_b_official_pdf,
 };
 use tax_return_application::storage::{exports_dir, save_year};
 
@@ -34,6 +35,7 @@ pub fn ReportPage() -> Element {
     let special = state.special_deduction;
     let deductions = state.deductions.clone();
     let d_detail = form_b.deductions_detail.clone();
+    let consumption_summary = calculate_consumption_tax(&state.to_document());
 
     rsx! {
         h1 { class: "page-title", "{blue.fiscal_year}年 帳票・集計" }
@@ -773,6 +775,26 @@ pub fn ReportPage() -> Element {
                     "出力先フォルダを開く"
                 }
             }
+
+            h3 { class: "subheading", style: "margin-top: 1.5rem;", "3. 消費税及び地方消費税 確定申告計算書 PDF 出力" }
+            p { class: "muted", style: "font-size: 0.85rem; margin-bottom: 0.75rem;",
+                "適格請求書（インボイス）登録番号、課税方式（{consumption_summary.config.tax_calc_method.label_ja()}）、課税標準額、控除税額、および国税・地方消費税納付額の内訳計算書を出力します。"
+            }
+            div { class: "meta-row", style: "margin-bottom: 0.75rem; font-size: 0.88rem; display: flex; gap: 1.2rem; flex-wrap: wrap;",
+                span { "課税売上高 (税込): " strong { "¥{format_yen(consumption_summary.sales.total_taxable_sales_inclusive)}" } }
+                span { "差引国税額: " strong { "¥{format_yen(consumption_summary.final_national_tax)}" } }
+                span { "地方消費税額: " strong { "¥{format_yen(consumption_summary.final_local_tax)}" } }
+                span { "合計納付税額: " strong { style: "color: #dc2626;", "¥{format_yen(consumption_summary.total_tax_payable)}" } }
+            }
+            div { class: "actions",
+                button {
+                    class: "btn btn-primary",
+                    onclick: move |_| {
+                        export_consumption_tax_file(app);
+                    },
+                    "消費税申告計算書 PDF出力 (.pdf)"
+                }
+            }
         }
 
         div { class: "card",
@@ -883,6 +905,34 @@ fn export_etax_file(mut app: Signal<AppState>) {
             let mut state = app.write();
             state.status_message = None;
             state.error_message = Some(format!("e-Tax XML出力に失敗しました: {e}"));
+        }
+    }
+}
+
+fn export_consumption_tax_file(mut app: Signal<AppState>) {
+    let doc = app.read().to_document();
+    let dir = match exports_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            app.write().error_message = Some(format!("出力先を解決できません: {e}"));
+            return;
+        }
+    };
+
+    let year = doc.fiscal_year;
+    let summary = calculate_consumption_tax(&doc);
+    let path = dir.join(format!("{year}_消費税申告計算書.pdf"));
+
+    match export_consumption_tax_pdf(&summary, &doc.taxpayer, &path) {
+        Ok(p) => {
+            let mut state = app.write();
+            state.error_message = None;
+            state.status_message = Some(format!("消費税申告計算書PDFを出力しました: {}", p.display()));
+        }
+        Err(e) => {
+            let mut state = app.write();
+            state.status_message = None;
+            state.error_message = Some(format!("消費税PDF出力に失敗しました: {e}"));
         }
     }
 }

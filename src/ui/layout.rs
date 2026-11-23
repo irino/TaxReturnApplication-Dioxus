@@ -1,5 +1,6 @@
 //! Shared shell layout and sidebar navigation.
 
+use crate::ui::analytics::AnalyticsPage;
 use crate::ui::closing::ClosingPage;
 use crate::ui::ledger::LedgerPage;
 use crate::ui::report::ReportPage;
@@ -10,6 +11,7 @@ pub enum Route {
     Ledger,
     Report,
     Closing,
+    Analytics,
 }
 
 #[component]
@@ -21,7 +23,7 @@ pub fn AppLayout() -> Element {
             aside { class: "sidebar",
                 div { class: "brand",
                     "確定申告ソフト"
-                    small { "仕訳 / 帳票 / 決算" }
+                    small { "仕訳 / 帳票 / 決算 / 分析" }
                 }
                 button {
                     class: if *route.read() == Route::Ledger { "nav-btn active" } else { "nav-btn" },
@@ -38,12 +40,18 @@ pub fn AppLayout() -> Element {
                     onclick: move |_| route.set(Route::Closing),
                     "決算・設定"
                 }
+                button {
+                    class: if *route.read() == Route::Analytics { "nav-btn active" } else { "nav-btn" },
+                    onclick: move |_| route.set(Route::Analytics),
+                    "📊 経営分析"
+                }
             }
             main { class: "content",
                 match *route.read() {
                     Route::Ledger => rsx! { LedgerPage {} },
                     Route::Report => rsx! { ReportPage {} },
                     Route::Closing => rsx! { ClosingPage {} },
+                    Route::Analytics => rsx! { AnalyticsPage {} },
                 }
             }
         }

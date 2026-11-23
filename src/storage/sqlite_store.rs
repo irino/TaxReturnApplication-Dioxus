@@ -151,6 +151,7 @@ pub fn init_sqlite_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
             fixed_assets_json TEXT NOT NULL,
             deductions_json TEXT NOT NULL,
             auto_rules_json TEXT,
+            consumption_tax_json TEXT,
             updated_at TEXT NOT NULL
         );
 
@@ -164,6 +165,7 @@ pub fn init_sqlite_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     // 既存DBへのカラム追加マイグレーション
     let _ = conn.execute("ALTER TABLE fiscal_year_meta ADD COLUMN auto_rules_json TEXT", []);
+    let _ = conn.execute("ALTER TABLE fiscal_year_meta ADD COLUMN consumption_tax_json TEXT", []);
 
     // JPY 通貨マスタとルートアカウントの初期化
     init_default_book_and_currency(conn)?;
@@ -330,14 +332,15 @@ pub fn save_year_to_sqlite(conn: &mut Connection, doc: &LedgerDocument) -> Resul
     let fixed_assets_json = serde_json::to_string(&doc.fixed_assets)?;
     let deductions_json = serde_json::to_string(&doc.deductions)?;
     let auto_rules_json = serde_json::to_string(&doc.auto_rules)?;
+    let consumption_tax_json = serde_json::to_string(&doc.consumption_tax)?;
     let now = Local::now().to_rfc3339();
 
     tx.execute(
         r#"
         INSERT INTO fiscal_year_meta (
             fiscal_year, taxpayer_json, special_deduction, accounts_json,
-            allocation_rules_json, fixed_assets_json, deductions_json, auto_rules_json, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            allocation_rules_json, fixed_assets_json, deductions_json, auto_rules_json, consumption_tax_json, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
         ON CONFLICT(fiscal_year) DO UPDATE SET
             taxpayer_json = excluded.taxpayer_json,
             special_deduction = excluded.special_deduction,
@@ -346,6 +349,7 @@ pub fn save_year_to_sqlite(conn: &mut Connection, doc: &LedgerDocument) -> Resul
             fixed_assets_json = excluded.fixed_assets_json,
             deductions_json = excluded.deductions_json,
             auto_rules_json = excluded.auto_rules_json,
+            consumption_tax_json = excluded.consumption_tax_json,
             updated_at = excluded.updated_at
         "#,
         params![
@@ -357,6 +361,7 @@ pub fn save_year_to_sqlite(conn: &mut Connection, doc: &LedgerDocument) -> Resul
             fixed_assets_json,
             deductions_json,
             auto_rules_json,
+            consumption_tax_json,
             now
         ],
     )?;
@@ -387,22 +392,22 @@ fn resolve_account_from_gnc_name(name: &str) -> (AccountCode, Option<String>) {
 /// SQLite データベースから指定年度の LedgerDocument を読み込み
 pub fn load_year_from_sqlite(conn: &Connection, year: i32) -> Result<LedgerDocument, SqliteError> {
     // 1. メタデータテーブルを検索
-    let meta_row: Option<(String, String, String, String, String, String, Option<String>)> = conn
+    let meta_row: Option<(String, String, String, String, String, String, Option<String>, Option<String>)> = conn
         .query_row(
             r#"
             SELECT taxpayer_json, special_deduction, accounts_json,
-                   allocation_rules_json, fixed_assets_json, deductions_json, auto_rules_json
+                   allocation_rules_json, fixed_assets_json, deductions_json, auto_rules_json, consumption_tax_json
             FROM fiscal_year_meta
             WHERE fiscal_year = ?1
             "#,
             params![year],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6).ok())),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6).ok(), r.get(7).ok())),
         )
         .optional()?;
 
-    let (taxpayer, special_deduction, accounts, allocation_rules, fixed_assets, deductions, auto_rules) =
+    let (taxpayer, special_deduction, accounts, allocation_rules, fixed_assets, deductions, auto_rules, consumption_tax) =
         match meta_row {
-            Some((tp, sd, accs, allocs, fa, deds, ar_opt)) => (
+            Some((tp, sd, accs, allocs, fa, deds, ar_opt, ct_opt)) => (
                 serde_json::from_str::<TaxpayerInfo>(&tp).unwrap_or_default(),
                 serde_json::from_str::<BlueSpecialDeductionKind>(&sd).unwrap_or_default(),
                 serde_json::from_str::<Vec<AccountDefinition>>(&accs)
@@ -415,6 +420,9 @@ pub fn load_year_from_sqlite(conn: &Connection, year: i32) -> Result<LedgerDocum
                 ar_opt
                     .and_then(|json| serde_json::from_str::<Vec<crate::core::auto_rule::AutoBookingRule>>(&json).ok())
                     .unwrap_or_else(crate::core::auto_rule::default_auto_rules),
+                ct_opt
+                    .and_then(|json| serde_json::from_str::<crate::core::consumption_tax::ConsumptionTaxConfig>(&json).ok())
+                    .unwrap_or_default(),
             ),
             None => (
                 TaxpayerInfo::default(),
@@ -424,6 +432,7 @@ pub fn load_year_from_sqlite(conn: &Connection, year: i32) -> Result<LedgerDocum
                 Vec::new(),
                 Default::default(),
                 crate::core::auto_rule::default_auto_rules(),
+                Default::default(),
             ),
         };
 
@@ -549,6 +558,7 @@ pub fn load_year_from_sqlite(conn: &Connection, year: i32) -> Result<LedgerDocum
         fixed_assets,
         deductions,
         auto_rules,
+        consumption_tax,
     })
 }
 

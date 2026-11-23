@@ -13,6 +13,9 @@ use tax_return_application::core::allocation::{
 };
 use tax_return_application::core::auto_rule::{default_auto_rules, AutoBookingRule, RuleMatchType};
 use tax_return_application::core::beancount::{export_to_beancount, import_from_beancount};
+use tax_return_application::core::consumption_tax::{
+    calculate_consumption_tax, ConsumptionTaxConfig, SimplifiedBusinessCategory, TaxCalcMethod,
+};
 use tax_return_application::core::depreciation::{
     apply_depreciation_entries, calculate_all_depreciations, clear_depreciation_entries,
     DepreciationMethod, FixedAsset,
@@ -36,6 +39,7 @@ pub enum ClosingTab {
     Rollover,
     Storage,
     AutoRules,
+    ConsumptionTax,
 }
 
 #[component]
@@ -98,6 +102,7 @@ pub fn ClosingPage() -> Element {
     let total_dep_closing: i64 = dep_calcs.iter().map(|c| c.closing_book_value).sum();
     let alloc_calcs = calculate_allocations(&doc_snapshot);
     let rollover_preview = calculate_rollover_preview(&doc_snapshot);
+    let consumption_calc = calculate_consumption_tax(&doc_snapshot);
 
     let sqlite_path = sqlite_db_path().unwrap_or_default();
     let sqlite_stats = open_sqlite_connection(&sqlite_path)
@@ -145,6 +150,11 @@ pub fn ClosingPage() -> Element {
                 class: if *active_tab.read() == ClosingTab::AutoRules { "tab-btn active" } else { "tab-btn" },
                 onclick: move |_| active_tab.set(ClosingTab::AutoRules),
                 "自動仕訳ルール設定"
+            }
+            button {
+                class: if *active_tab.read() == ClosingTab::ConsumptionTax { "tab-btn active" } else { "tab-btn" },
+                onclick: move |_| active_tab.set(ClosingTab::ConsumptionTax),
+                "消費税 & インボイス設定"
             }
         }
 
@@ -1421,6 +1431,247 @@ pub fn ClosingPage() -> Element {
                                             }
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            ClosingTab::ConsumptionTax => rsx! {
+                // ---- 消費税・インボイス制度設定 ----
+                div { class: "card",
+                    h2 { "消費税・適格請求書（インボイス）設定" }
+                    p { class: "muted",
+                        "消費税の課税事業者設定、適格請求書発行事業者登録番号（T番号）、および適用する課税方式（本則課税 / 簡易課税 / 2割特例）を設定します。"
+                    }
+
+                    div { class: "form-grid", style: "margin-bottom: 1rem;",
+                        div { class: "field wide",
+                            label { style: "display: flex; align-items: center; gap: 0.5rem; cursor: pointer;",
+                                input {
+                                    r#type: "checkbox",
+                                    checked: app.read().consumption_tax.is_taxable_business,
+                                    onchange: move |evt| {
+                                        let mut doc = app.read().to_document();
+                                        doc.consumption_tax.is_taxable_business = evt.checked();
+                                        if let Err(e) = save_year(&doc) {
+                                            app.write().error_message = Some(format!("保存に失敗しました: {e}"));
+                                        } else {
+                                            *app.write() = AppState::from_document(
+                                                doc,
+                                                Some("課税事業者設定を更新しました".into()),
+                                            );
+                                        }
+                                    }
+                                }
+                                strong { "消費税の課税事業者として確定申告を行う（免税事業者の場合はチェックを外す）" }
+                            }
+                        }
+
+                        div { class: "field",
+                            label { "適格請求書発行事業者登録番号（T + 13桁）" }
+                            input {
+                                r#type: "text",
+                                placeholder: "例: T1234567890123",
+                                value: "{app.read().consumption_tax.invoice_registration_number.clone().unwrap_or_default()}",
+                                oninput: move |evt| {
+                                    let v = evt.value().trim().to_string();
+                                    let mut doc = app.read().to_document();
+                                    doc.consumption_tax.invoice_registration_number = if v.is_empty() { None } else { Some(v) };
+                                    if let Err(e) = save_year(&doc) {
+                                        app.write().error_message = Some(format!("保存に失敗しました: {e}"));
+                                    } else {
+                                        *app.write() = AppState::from_document(doc, None);
+                                    }
+                                }
+                            }
+                            {
+                                let cur_num = app.read().consumption_tax.invoice_registration_number.clone().unwrap_or_default();
+                                if !cur_num.is_empty() {
+                                    if ConsumptionTaxConfig::is_valid_invoice_number(&cur_num) {
+                                        rsx! { span { style: "color: #10b981; font-size: 0.82rem; font-weight: bold; margin-top: 0.2rem;", "✓ 有効なインボイス番号形式 (T+13桁)" } }
+                                    } else {
+                                        rsx! { span { style: "color: #ef4444; font-size: 0.82rem; margin-top: 0.2rem;", "⚠️ Tから始まる13桁の半角数字で入力してください" } }
+                                    }
+                                } else {
+                                    rsx! { span { class: "muted", style: "font-size: 0.82rem;", "未登録の場合は空欄のままで構いません" } }
+                                }
+                            }
+                        }
+
+                        div { class: "field",
+                            label { "適用する計算方式" }
+                            select {
+                                value: match app.read().consumption_tax.tax_calc_method {
+                                    TaxCalcMethod::TwoTenthsSpecial => "two_tenths",
+                                    TaxCalcMethod::Simplified => "simplified",
+                                    TaxCalcMethod::General => "general",
+                                },
+                                onchange: move |evt| {
+                                    let method = match evt.value().as_str() {
+                                        "simplified" => TaxCalcMethod::Simplified,
+                                        "general" => TaxCalcMethod::General,
+                                        _ => TaxCalcMethod::TwoTenthsSpecial,
+                                    };
+                                    let mut doc = app.read().to_document();
+                                    doc.consumption_tax.tax_calc_method = method;
+                                    if let Err(e) = save_year(&doc) {
+                                        app.write().error_message = Some(format!("保存に失敗しました: {e}"));
+                                    } else {
+                                        *app.write() = AppState::from_document(
+                                            doc,
+                                            Some(format!("計算方式を「{}」に更新しました", method.label_ja())),
+                                        );
+                                    }
+                                },
+                                option { value: "two_tenths", "インボイス2割特例（売上税額の20%のみ納付）" }
+                                option { value: "simplified", "簡易課税制度（みなし仕入率適用）" }
+                                option { value: "general", "本則課税（一般実額課税）" }
+                            }
+                        }
+
+                        if app.read().consumption_tax.tax_calc_method == TaxCalcMethod::Simplified {
+                            div { class: "field",
+                                label { "簡易課税の事業区分" }
+                                select {
+                                    onchange: move |evt| {
+                                        let cat = match evt.value().as_str() {
+                                            "1" => SimplifiedBusinessCategory::Type1Wholesale,
+                                            "2" => SimplifiedBusinessCategory::Type2Retail,
+                                            "3" => SimplifiedBusinessCategory::Type3Manufacturing,
+                                            "4" => SimplifiedBusinessCategory::Type4Other,
+                                            "6" => SimplifiedBusinessCategory::Type6RealEstate,
+                                            _ => SimplifiedBusinessCategory::Type5Service,
+                                        };
+                                        let mut doc = app.read().to_document();
+                                        doc.consumption_tax.simplified_category = cat;
+                                        if let Err(e) = save_year(&doc) {
+                                            app.write().error_message = Some(format!("保存に失敗しました: {e}"));
+                                        } else {
+                                            *app.write() = AppState::from_document(
+                                                doc,
+                                                Some(format!("簡易課税事業区分を「{}」に設定しました", cat.label_ja())),
+                                            );
+                                        }
+                                    },
+                                    for cat in SimplifiedBusinessCategory::all() {
+                                        option {
+                                            value: match cat {
+                                                SimplifiedBusinessCategory::Type1Wholesale => "1",
+                                                SimplifiedBusinessCategory::Type2Retail => "2",
+                                                SimplifiedBusinessCategory::Type3Manufacturing => "3",
+                                                SimplifiedBusinessCategory::Type4Other => "4",
+                                                SimplifiedBusinessCategory::Type5Service => "5",
+                                                SimplifiedBusinessCategory::Type6RealEstate => "6",
+                                            },
+                                            selected: app.read().consumption_tax.simplified_category == *cat,
+                                            "{cat.label_ja()}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ---- 各課税方式による納税額シミュレーション比較 ----
+                div { class: "card",
+                    h2 { "各課税方式による納税額シミュレーション比較" }
+                    p { class: "muted", "現在の仕訳帳データから、各課税方式を採用した場合の納付税額（国税＋地方税）をリアルタイムに自動算出して比較します。" }
+
+                    div { class: "table-container", style: "margin-top: 0.8rem;",
+                        table { class: "data-table",
+                            thead {
+                                tr {
+                                    th { "課税計算方式" }
+                                    th { "仕入税額控除の計算" }
+                                    th { style: "text-align: right;", "納付予定税額合計" }
+                                    th { style: "text-align: center;", "判定 / 有利度" }
+                                }
+                            }
+                            tbody {
+                                tr {
+                                    td { strong { "本則課税 (一般課税)" } }
+                                    td { "実際の課税仕入高から実額控除" }
+                                    td { style: "text-align: right;", "¥{format_yen(consumption_calc.simulation.general_tax_payable)}" }
+                                    td { style: "text-align: center;",
+                                        if consumption_calc.simulation.most_advantageous_method == TaxCalcMethod::General {
+                                            span { class: "badge badge-success", "★ 納税額最小（最有利）" }
+                                        } else {
+                                            span { class: "muted", "-" }
+                                        }
+                                    }
+                                }
+                                tr {
+                                    td { strong { "簡易課税制度" } }
+                                    td { "{consumption_calc.config.simplified_category.label_ja()} みなし控除" }
+                                    td { style: "text-align: right;", "¥{format_yen(consumption_calc.simulation.simplified_tax_payable)}" }
+                                    td { style: "text-align: center;",
+                                        if consumption_calc.simulation.most_advantageous_method == TaxCalcMethod::Simplified {
+                                            span { class: "badge badge-success", "★ 納税額最小（最有利）" }
+                                        } else {
+                                            span { class: "muted", "-" }
+                                        }
+                                    }
+                                }
+                                tr {
+                                    td { strong { "インボイス2割特例" } }
+                                    td { "売上税額の80%を一律控除（納付税額は20%）" }
+                                    td { style: "text-align: right;", "¥{format_yen(consumption_calc.simulation.two_tenths_tax_payable)}" }
+                                    td { style: "text-align: center;",
+                                        if consumption_calc.simulation.most_advantageous_method == TaxCalcMethod::TwoTenthsSpecial {
+                                            span { class: "badge badge-success", "★ 納税額最小（最有利）" }
+                                        } else {
+                                            span { class: "muted", "-" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ---- 申告税額サマリー ----
+                div { class: "card",
+                    h2 { "現在の申告設定での納付税額内訳" }
+                    div { class: "table-container",
+                        table { class: "data-table",
+                            tbody {
+                                tr {
+                                    td { "課税売上高合計 (税込)" }
+                                    td { style: "text-align: right;", "¥{format_yen(consumption_calc.sales.total_taxable_sales_inclusive)}" }
+                                }
+                                tr {
+                                    td { "うち 10%標準税率売上高 (税込)" }
+                                    td { style: "text-align: right;", "¥{format_yen(consumption_calc.sales.sales_10_inclusive)}" }
+                                }
+                                tr {
+                                    td { "うち 8%軽減税率売上高 (税込)" }
+                                    td { style: "text-align: right;", "¥{format_yen(consumption_calc.sales.sales_8_inclusive)}" }
+                                }
+                                tr {
+                                    td { "課税標準額 (1,000円未満切捨て)" }
+                                    td { style: "text-align: right;", "¥{format_yen(consumption_calc.tax_base_amount)}" }
+                                }
+                                tr {
+                                    td { "課税標準額に対する消費税額 (国税分)" }
+                                    td { style: "text-align: right;", "¥{format_yen(consumption_calc.output_tax_national)}" }
+                                }
+                                tr {
+                                    td { "控除対象仕入税額 (国税分)" }
+                                    td { style: "text-align: right;", "▲ ¥{format_yen(consumption_calc.input_tax_deduction_national)}" }
+                                }
+                                tr {
+                                    td { "差引消費税額 (国税確定額・100円切捨て)" }
+                                    td { style: "text-align: right; font-weight: bold;", "¥{format_yen(consumption_calc.final_national_tax)}" }
+                                }
+                                tr {
+                                    td { "地方消費税納付税額 (国税 × 22/78・100円切捨て)" }
+                                    td { style: "text-align: right; font-weight: bold;", "¥{format_yen(consumption_calc.final_local_tax)}" }
+                                }
+                                tr { style: "background: #f8fafc; font-size: 1.05rem;",
+                                    td { strong { "合計納付すべき消費税及び地方消費税額" } }
+                                    td { style: "text-align: right; color: #dc2626; font-weight: bold;", "¥{format_yen(consumption_calc.total_tax_payable)}" }
                                 }
                             }
                         }

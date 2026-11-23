@@ -1,9 +1,11 @@
 //! Pure tax and accounting logic. No UI dependencies.
 
 pub mod allocation;
+pub mod analytics;
 pub mod auto_rule;
 pub mod beancount;
 pub mod compound;
+pub mod consumption_tax;
 pub mod csv_import;
 pub mod deductions;
 pub mod depreciation;
@@ -17,9 +19,17 @@ pub use allocation::{
     apply_allocations, calculate_allocations, clear_allocations, generate_allocation_entries,
     is_allocation_entry, AllocationCalculation,
 };
+pub use analytics::{
+    calculate_analytics, AnalyticsSummary, ExpenseShare, FinancialKPIs, MonthlyMetric,
+};
 pub use auto_rule::{default_auto_rules, match_auto_rule, AutoBookingRule, RuleMatchType};
 pub use beancount::{account_to_beancount_name, beancount_name_to_account, export_to_beancount, import_from_beancount};
 pub use compound::{CompoundError, CompoundSplit, CompoundTransaction};
+pub use consumption_tax::{
+    calculate_consumption_tax, infer_tax_category, ConsumptionTaxConfig,
+    ConsumptionTaxSummary, SimplifiedBusinessCategory, TaxCalcMethod, TaxCategory,
+    TaxMethodSimulation, TaxablePurchaseBreakdown, TaxableSalesBreakdown,
+};
 pub use csv_import::{
     decode_csv_bytes, parse_flexible_date, parse_legacy_csv, parse_legacy_csv_str,
     CsvImportReport, CsvRowError,

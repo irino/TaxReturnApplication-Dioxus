@@ -1,6 +1,7 @@
 //! Journal structures, chart of accounts, sub-accounts, and bookkeeping validation.
 
 use crate::core::auto_rule::{default_auto_rules, AutoBookingRule};
+use crate::core::consumption_tax::ConsumptionTaxConfig;
 use crate::core::deductions::TaxDeductions;
 use crate::core::depreciation::FixedAsset;
 use chrono::{DateTime, Datelike, Local, NaiveDate};
@@ -9,7 +10,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 /// Schema version written into persisted ledger documents.
-pub const CURRENT_SCHEMA_VERSION: u32 = 4;
+pub const CURRENT_SCHEMA_VERSION: u32 = 5;
 
 /// High-level account nature for balance / P&L classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -376,6 +377,9 @@ pub struct LedgerDocument {
     /// ルールベース自動仕訳ルール
     #[serde(default = "default_auto_rules")]
     pub auto_rules: Vec<AutoBookingRule>,
+    /// 消費税・インボイス設定
+    #[serde(default)]
+    pub consumption_tax: ConsumptionTaxConfig,
 }
 
 impl LedgerDocument {
@@ -391,6 +395,7 @@ impl LedgerDocument {
             fixed_assets: Vec::new(),
             deductions: TaxDeductions::default(),
             auto_rules: default_auto_rules(),
+            consumption_tax: ConsumptionTaxConfig::default(),
         }
     }
 

@@ -1,5 +1,6 @@
 //! Dioxus UI components.
 
+pub mod analytics;
 pub mod closing;
 pub mod layout;
 pub mod ledger;
